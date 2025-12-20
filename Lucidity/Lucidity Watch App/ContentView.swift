@@ -13,44 +13,61 @@ struct ContentView: View {
     @StateObject private var health = HealthKitManager.shared
     @StateObject private var haptics = HapticCueManager()
     @State private var isMonitoring = false
+    @State private var statusMessage = ""
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 8) {
+        ScrollView {
+            VStack(spacing: 6) {
                 Text("Lucidity")
-                    .font(.headline)
+                    .font(.caption)
                     .bold()
 
-                VStack(spacing: 4) {
+                VStack(spacing: 2) {
                     Text("HR: \(formattedHeartRate())")
-                        .font(.caption)
-                    Text("Sleep: \(formattedSleepWindow())")
+                        .font(.caption2)
+                    Text("Last: \(formattedSleepWindow())")
                         .font(.caption2)
                         .lineLimit(1)
                 }
                 .foregroundColor(.secondary)
 
-                VStack(spacing: 8) {
+                if !statusMessage.isEmpty {
+                    Text(statusMessage)
+                        .font(.caption2)
+                        .foregroundColor(.orange)
+                        .multilineTextAlignment(.center)
+                        .padding(.vertical, 4)
+                }
+
+                VStack(spacing: 6) {
                     Button(action: {
                         Task { @MainActor in
+                            statusMessage = "Requesting permissions..."
                             isMonitoring = true
-                            if !health.isAuthorized {
-                                health.requestAuthorization { success, error in
-                                    Task { @MainActor in
+
+                            health.requestAuthorization { success, error in
+                                Task { @MainActor in
+                                    if success {
+                                        statusMessage = "Starting..."
                                         health.startMonitoring()
                                         haptics.startCueing()
                                         WorkoutSessionManager.shared.startOvernightSession()
+
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                            statusMessage = "Monitoring active"
+                                        }
+                                    } else {
+                                        statusMessage = "Permission denied"
+                                        isMonitoring = false
                                     }
                                 }
-                            } else {
-                                health.startMonitoring()
-                                haptics.startCueing()
-                                WorkoutSessionManager.shared.startOvernightSession()
                             }
                         }
                     }) {
-                        Text("Start Night")
+                        Text(isMonitoring ? "Monitoring..." : "Start Night")
+                            .font(.caption)
                             .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(isMonitoring)
@@ -58,13 +75,20 @@ struct ContentView: View {
                     Button(action: {
                         Task { @MainActor in
                             isMonitoring = false
+                            statusMessage = "Stopped"
                             health.stopMonitoring()
                             haptics.stopCueing()
                             WorkoutSessionManager.shared.stopSession()
+
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                statusMessage = ""
+                            }
                         }
                     }) {
                         Text("Stop")
+                            .font(.caption)
                             .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
                     }
                     .buttonStyle(.bordered)
                     .tint(.red)
@@ -73,15 +97,10 @@ struct ContentView: View {
                 NavigationLink("History") {
                     HistoryView()
                 }
-                .font(.caption)
-                .padding(.top, 4)
-
-                Text("For wellness only")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .padding(.top, 4)
+                .font(.caption2)
+                .padding(.top, 2)
             }
-            .padding(.horizontal, 8)
+            .padding(6)
         }
         .onAppear {
             if !health.isAuthorized {
