@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+
+    <key>NSHealthShareUsageDescription</key>
+    <string>This app reads your sleep analysis and heart rate to provide gentle haptic cues to aid lucid dreaming awareness.</string>
+    <key>NSSleepTrackingUsageDescription</key>
+    <string>This app uses background sleep tracking to monitor sleep stages and improve haptic cue timing for lucid dreaming.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>This app uses Bluetooth to connect to external heart rate sensors for accurate heart rate monitoring.</string>
+
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>processing</string>
+        <string>fetch</string>
+    </array>
+    <key>WKBackgroundModes</key>
+    <array>
+        <string>workout-processing</string>
+    </array>
+
+    <key>WKRequiresPersistentWiFi</key>
+    <false/>
+
+    <key>HKTypeIdentifiersToShare</key>
+    <array>
+    </array>
+    <key>HKTypeIdentifiersToRead</key>
+    <array>
+        <string>HKCategoryTypeIdentifierSleepAnalysis</string>
+        <string>HKQuantityTypeIdentifierHeartRate</string>
+    </array>
+</dict>
+</plist>
