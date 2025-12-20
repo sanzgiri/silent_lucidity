@@ -12,53 +12,77 @@ import Combine
 struct ContentView: View {
     @StateObject private var health = HealthKitManager.shared
     @StateObject private var haptics = HapticCueManager()
+    @State private var isMonitoring = false
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
+            VStack(spacing: 8) {
                 Text("Lucidity")
-                    .font(.title2)
+                    .font(.headline)
                     .bold()
-                
-                Text("Last sleep window: \(formattedSleepWindow())\nLast heart rate: \(formattedHeartRate())")
-                    .multilineTextAlignment(.center)
-                    .font(.body)
-                
-                HStack(spacing: 20) {
-                    Button("Start Night") {
-                        if !health.isAuthorized {
-                            health.requestAuthorization { success, error in
+
+                VStack(spacing: 4) {
+                    Text("HR: \(formattedHeartRate())")
+                        .font(.caption)
+                    Text("Sleep: \(formattedSleepWindow())")
+                        .font(.caption2)
+                        .lineLimit(1)
+                }
+                .foregroundColor(.secondary)
+
+                VStack(spacing: 8) {
+                    Button(action: {
+                        Task { @MainActor in
+                            isMonitoring = true
+                            if !health.isAuthorized {
+                                health.requestAuthorization { success, error in
+                                    Task { @MainActor in
+                                        health.startMonitoring()
+                                        haptics.startCueing()
+                                        WorkoutSessionManager.shared.startOvernightSession()
+                                    }
+                                }
+                            } else {
                                 health.startMonitoring()
                                 haptics.startCueing()
                                 WorkoutSessionManager.shared.startOvernightSession()
                             }
-                        } else {
-                            health.startMonitoring()
-                            haptics.startCueing()
-                            WorkoutSessionManager.shared.startOvernightSession()
                         }
+                    }) {
+                        Text("Start Night")
+                            .frame(maxWidth: .infinity)
                     }
-                    Button("Stop") {
-                        health.stopMonitoring()
-                        haptics.stopCueing()
-                        WorkoutSessionManager.shared.stopSession()
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isMonitoring)
+
+                    Button(action: {
+                        Task { @MainActor in
+                            isMonitoring = false
+                            health.stopMonitoring()
+                            haptics.stopCueing()
+                            WorkoutSessionManager.shared.stopSession()
+                        }
+                    }) {
+                        Text("Stop")
+                            .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
                 }
-                .buttonStyle(.bordered)
-                
-                NavigationLink("View History") {
+
+                NavigationLink("History") {
                     HistoryView()
                 }
-                .font(.footnote)
-                
-                Text("Disclaimer: This app is for informational purposes only.")
-                    .font(.footnote)
-                    .multilineTextAlignment(.center)
+                .font(.caption)
+                .padding(.top, 4)
+
+                Text("For wellness only")
+                    .font(.caption2)
                     .foregroundColor(.secondary)
-                    .padding(.top, 8)
+                    .padding(.top, 4)
             }
+            .padding(.horizontal, 8)
         }
-        .padding()
         .onAppear {
             if !health.isAuthorized {
                 health.requestAuthorization { success, error in
@@ -71,22 +95,19 @@ struct ContentView: View {
     }
     
     private func formattedSleepWindow() -> String {
-        if let start = health.latestSleepStart, let end = health.latestSleepEnd {
+        if let start = health.latestSleepStart {
             let formatter = DateFormatter()
             formatter.timeStyle = .short
-            formatter.dateStyle = .short
-            return "\(formatter.string(from: start)) - \(formatter.string(from: end))"
-        } else {
-            return "No data"
+            return formatter.string(from: start)
         }
+        return "None"
     }
-    
+
     private func formattedHeartRate() -> String {
         if let hr = health.latestHeartRate {
-            return String(format: "%.0f bpm", hr)
-        } else {
-            return "No data"
+            return String(format: "%.0f", hr)
         }
+        return "--"
     }
 }
 
