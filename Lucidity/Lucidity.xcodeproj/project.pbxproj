@@ -331,6 +331,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Lucidity;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "This app reads your sleep analysis and heart rate to provide gentle haptic cues to aid lucid dreaming awareness.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "This app creates workout sessions to enable continuous heart rate monitoring during sleep for REM detection.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKWatchOnly = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -364,6 +366,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Lucidity;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "This app reads your sleep analysis and heart rate to provide gentle haptic cues to aid lucid dreaming awareness.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "This app creates workout sessions to enable continuous heart rate monitoring during sleep for REM detection.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKWatchOnly = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
