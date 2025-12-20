@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 
 struct CueEvent: Identifiable {
     let id = UUID()
@@ -13,6 +14,8 @@ final class HistoryStore: ObservableObject {
     
     @Published var events: [CueEvent] = []
     
+    init() {}
+    
     func log(note: String) {
         let event = CueEvent(date: Date(), note: note)
         events.append(event)
@@ -20,7 +23,7 @@ final class HistoryStore: ObservableObject {
 }
 
 struct HistoryView: View {
-    @ObservedObject private var store = HistoryStore.shared
+    @ObservedObject var store = HistoryStore.shared
     
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()

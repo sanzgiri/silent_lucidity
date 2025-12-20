@@ -42,12 +42,14 @@ find_watch() {
 # Function to build project
 build_project() {
     echo "🔨 Building Lucidity Watch App..."
-    
-    xcodebuild -scheme "$SCHEME_NAME" \
-               -destination "generic/platform=watchOS" \
+
+    # Build using -target instead of -scheme to avoid container stub issues
+    xcodebuild -project Lucidity.xcodeproj \
+               -target "$SCHEME_NAME" \
+               -sdk watchos \
                -configuration "$CONFIGURATION" \
                clean build
-    
+
     if [ $? -eq 0 ]; then
         echo_success "Build completed successfully!"
     else
@@ -60,12 +62,14 @@ build_project() {
 install_on_device() {
     find_watch
     echo "📱 Installing on Apple Watch..."
-    
-    xcodebuild -scheme "$SCHEME_NAME" \
+
+    # Build using -target instead of -scheme to avoid container stub issues
+    xcodebuild -project Lucidity.xcodeproj \
+               -target "$SCHEME_NAME" \
                -destination "platform=watchOS,name=$WATCH_NAME" \
                -configuration "$CONFIGURATION" \
                install
-    
+
     if [ $? -eq 0 ]; then
         echo_success "App installed successfully on Apple Watch!"
         echo_success "Check your watch for the Lucidity app."
@@ -78,11 +82,12 @@ install_on_device() {
 # Function to clean build folder
 clean_project() {
     echo "🧹 Cleaning build artifacts..."
-    
-    xcodebuild -scheme "$SCHEME_NAME" \
+
+    xcodebuild -project Lucidity.xcodeproj \
+               -target "$SCHEME_NAME" \
                -configuration "$CONFIGURATION" \
                clean
-    
+
     if [ $? -eq 0 ]; then
         echo_success "Clean completed successfully!"
     else

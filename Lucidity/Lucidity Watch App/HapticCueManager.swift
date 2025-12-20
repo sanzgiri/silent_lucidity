@@ -1,6 +1,7 @@
 import WatchKit
 import Foundation
 import SwiftUI
+import Combine
 
 /// Manages haptic cues related to REM window changes.
 /// 
@@ -17,7 +18,7 @@ final class HapticCueManager: ObservableObject {
     private var timer: Timer?
     private var isREM: Bool = false
 
-    private init() {}
+    public init() {}
 
     /// Starts observing REM window changes and begins cueing when REM is true.
     func startCueing() {
@@ -25,14 +26,14 @@ final class HapticCueManager: ObservableObject {
         isCueing = true
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(remWindowDidChange(_:)),
-                                               name: Notification.Name("REMWindowDidChange"),
+                                               name: HealthKitManager.remWindowDidChangeNotification,
                                                object: nil)
     }
 
     /// Stops all cueing and removes observers.
     func stopCueing() {
         isCueing = false
-        NotificationCenter.default.removeObserver(self, name: Notification.Name("REMWindowDidChange"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: HealthKitManager.remWindowDidChangeNotification, object: nil)
         cancelTimer()
         isREM = false
     }
@@ -96,6 +97,11 @@ final class HapticCueManager: ObservableObject {
         // Optionally add a subtle secondary haptic for minimal intrusiveness
         if #available(watchOS 6.0, *) {
             device.play(.start)
+        }
+
+        // Log the cue delivery to history
+        Task { @MainActor in
+            HistoryStore.shared.log(note: "Cue delivered")
         }
     }
 }

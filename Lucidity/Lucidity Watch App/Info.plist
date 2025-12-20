@@ -13,6 +13,8 @@
 
     <key>NSHealthShareUsageDescription</key>
     <string>This app reads your sleep analysis and heart rate to provide gentle haptic cues to aid lucid dreaming awareness.</string>
+    <key>NSHealthUpdateUsageDescription</key>
+    <string>This app creates workout sessions to enable continuous heart rate monitoring during sleep for REM detection.</string>
     <key>NSSleepTrackingUsageDescription</key>
     <string>This app uses background sleep tracking to monitor sleep stages and improve haptic cue timing for lucid dreaming.</string>
     <key>NSBluetoothAlwaysUsageDescription</key>

@@ -2,7 +2,8 @@ import Foundation
 import HealthKit
 import WatchKit
 
-final class WorkoutSessionManager: NSObject {
+@preconcurrency
+final class WorkoutSessionManager: NSObject, HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelegate {
     static let shared = WorkoutSessionManager()
 
     private let healthStore = HKHealthStore()
@@ -13,7 +14,7 @@ final class WorkoutSessionManager: NSObject {
         let typesToShare: Set = [HKObjectType.workoutType()]
         let typesToRead: Set = [HKObjectType.quantityType(forIdentifier: .heartRate)!]
 
-        healthStore.requestAuthorization(toShare: typesToShare, read: typesToRead) { [weak self] success, _ in
+        healthStore.requestAuthorization(toShare: typesToShare, read: typesToRead) { [weak self] success, error in
             guard success, let self = self else { return }
 
             let configuration = HKWorkoutConfiguration()
@@ -28,7 +29,7 @@ final class WorkoutSessionManager: NSObject {
                 self.builder?.dataSource = HKLiveWorkoutDataSource(healthStore: self.healthStore, workoutConfiguration: configuration)
 
                 self.session?.startActivity(with: Date())
-                self.builder?.beginCollection(withStart: Date()) { _ in }
+                self.builder?.beginCollection(withStart: Date()) { success, error in }
             } catch {
                 // Handle errors if needed
             }
@@ -37,24 +38,37 @@ final class WorkoutSessionManager: NSObject {
 
     func stopSession() {
         session?.end()
-        builder?.endCollection(withEnd: Date()) { [weak self] _ in
-            self?.builder?.finishWorkout(completion: { _ in })
+        builder?.endCollection(withEnd: Date()) { [weak self] success, error in
+            self?.builder?.finishWorkout(completion: { _, _ in })
+
+
+
+
+
+
+
+
+
         }
     }
-}
 
-extension WorkoutSessionManager: HKWorkoutSessionDelegate {
-    func workoutSession(_ workoutSession: HKWorkoutSession, didChangeTo toState: HKWorkoutSessionState, from fromState: HKWorkoutSessionState, date: Date) {
+    // MARK: - HKWorkoutSessionDelegate
+
+    nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didChangeTo toState: HKWorkoutSessionState, from fromState: HKWorkoutSessionState, date: Date) {
         // Minimal stub
     }
 
-    func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {
+    nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {
         // Minimal stub
     }
-}
 
-extension WorkoutSessionManager: HKLiveWorkoutBuilderDelegate {
-    func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {
+    // MARK: - HKLiveWorkoutBuilderDelegate
+
+    nonisolated func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {
+        // Minimal stub
+    }
+
+    nonisolated func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder, didCollectDataOf types: Set<HKSampleType>) {
         // Minimal stub
     }
 }
