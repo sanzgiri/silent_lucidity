@@ -50,3 +50,17 @@ To verify the new heuristics without sleeping for 8 hours:
     *   Keep the watch perfectly still (on a table).
     *   **Simulate HR Volatility**: If testing on a device, do some light activity (jumping jacks) then sit still to make your HR fluctuate while the accelerometer is stable. (Or use the Simulator's "Variable Heart Rate" mode).
 3.  **Verify Trigger**: The debug log should show `REM Trigger! Vol: X.X`.
+
+## 6. Watch App HealthKit Monitoring (Current App)
+**Device (recommended):**
+1.  Install the watch app target on a physical Apple Watch.
+2.  Open the app and tap **Start Night**.
+3.  **Verify**:
+    *   HealthKit authorization prompt appears.
+    *   Status changes to "Monitoring active" and heart rate starts updating.
+    *   Workout indicator appears on the watch face (background execution).
+
+**Simulator:**
+1.  Run on an Apple Watch simulator.
+2.  Tap **Start Night**.
+3.  **Expect**: "Health data unavailable" (or permission denied) and no HR/sleep updates, since HealthKit data is typically unavailable in the simulator.

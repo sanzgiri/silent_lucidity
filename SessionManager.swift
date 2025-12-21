@@ -45,7 +45,7 @@ class SessionManager: NSObject, ObservableObject {
     
     func requestAuthorization() {
         let typesToShare: Set = [
-            HKQuantityType.workoutType()
+            HKObjectType.workoutType()
         ]
         
         let typesToRead: Set = [

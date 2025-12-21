@@ -32,6 +32,7 @@ class DreamDetector: ObservableObject {
             return
         }
         
+        resetState()
         isMonitoring = true
         motionManager.deviceMotionUpdateInterval = 1.0
         motionManager.startDeviceMotionUpdates(to: .main) { [weak self] (data, error) in
@@ -44,6 +45,7 @@ class DreamDetector: ObservableObject {
     func stopMonitoring() {
         motionManager.stopDeviceMotionUpdates()
         isMonitoring = false
+        resetState()
         debugLog = "Monitoring stopped"
     }
     
@@ -132,6 +134,16 @@ class DreamDetector: ObservableObject {
         if hrVolatility > volatilityThreshold {
              triggerRealityCheck()
         }
+    }
+
+    private func resetState() {
+        isDreamingCandidate = false
+        lastTriggerTime = nil
+        currentHR = 0.0
+        hrVolatility = 0.0
+        lastMovementTime = Date()
+        sleepOnsetTime = nil
+        heartRateBuffer.removeAll()
     }
     
     private func triggerRealityCheck() {

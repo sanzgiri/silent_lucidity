@@ -10,6 +10,12 @@
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleName</key>
     <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>WKApplication</key>
+    <true/>
+    <key>WKWatchOnly</key>
+    <true/>
 
     <key>NSHealthShareUsageDescription</key>
     <string>This app reads your sleep analysis and heart rate to provide gentle haptic cues to aid lucid dreaming awareness.</string>

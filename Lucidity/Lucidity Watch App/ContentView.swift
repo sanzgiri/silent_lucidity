@@ -57,7 +57,22 @@ struct ContentView: View {
                                             statusMessage = "Monitoring active"
                                         }
                                     } else {
-                                        statusMessage = "Permission denied"
+                                        if let nsError = error as NSError? {
+                                            if nsError.domain == HKErrorDomain, let hkCode = HKError.Code(rawValue: nsError.code) {
+                                                switch hkCode {
+                                                case .errorAuthorizationDenied:
+                                                    statusMessage = "Permission denied"
+                                                case .errorHealthDataUnavailable:
+                                                    statusMessage = "Health data unavailable"
+                                                default:
+                                                    statusMessage = nsError.localizedDescription
+                                                }
+                                            } else {
+                                                statusMessage = nsError.localizedDescription
+                                            }
+                                        } else {
+                                            statusMessage = "Permission denied"
+                                        }
                                         isMonitoring = false
                                     }
                                 }

@@ -3,7 +3,6 @@ import HealthKit
 import Combine
 
 @MainActor
-@available(watchOS 11, *)
 /// HealthKitManager is a singleton ObservableObject designed for use on watchOS to monitor sleep and heart rate data.
 /// It requests authorization to read sleep analysis and heart rate data, monitors relevant changes, and attempts to approximate probable REM sleep windows.
 /// 
@@ -52,9 +51,12 @@ final class HealthKitManager: ObservableObject {
         print("Requesting HealthKit authorization...")
         guard HKHealthStore.isHealthDataAvailable() else {
             print("HealthKit not available on this device")
+            let error = NSError(domain: HKErrorDomain,
+                                code: HKError.Code.errorHealthDataUnavailable.rawValue,
+                                userInfo: [NSLocalizedDescriptionKey: "Health data is not available on this device."])
             Task { @MainActor in
                 self.isAuthorized = false
-                completion(false, nil)
+                completion(false, error)
             }
             return
         }
@@ -141,7 +143,7 @@ final class HealthKitManager: ObservableObject {
         
         // Heart rate anchored query for updates with 1-minute interval on recent samples (last 8 hours)
         let eightHoursAgo = Date().addingTimeInterval(-8 * 60 * 60)
-        let predicate = HKQuery.predicateForSamples(withStart: eightHoursAgo, end: Date(), options: .strictStartDate)
+        let predicate = HKQuery.predicateForSamples(withStart: eightHoursAgo, end: nil, options: .strictStartDate)
         
         // Initial anchor is nil to get all existing samples initially
         heartRateAnchoredQuery = HKAnchoredObjectQuery(type: heartRateType, predicate: predicate, anchor: heartRateAnchor, limit: HKObjectQueryNoLimit) { [weak self] _, samplesOrNil, _, newAnchor, errorOrNil in
@@ -226,11 +228,16 @@ final class HealthKitManager: ObservableObject {
     /// Returns nil if no suitable samples found.
     func latestSleepStartDate() async -> Date? {
         guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return nil }
-        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
-        let predicate = HKQuery.predicateForSamples(withStart: nil, end: Date(), options: .strictEndDate)
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        let lookbackStart = Date().addingTimeInterval(-sleepSampleLookback)
+        let predicate = HKQuery.predicateForSamples(withStart: lookbackStart, end: Date(), options: .strictStartDate)
         
         return await withCheckedContinuation { continuation in
-            let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: 100, sortDescriptors: [sortDescriptor]) { _, samplesOrNil, errorOrNil in
+            let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: [sortDescriptor]) { [weak self] _, samplesOrNil, errorOrNil in
+                guard let self = self else {
+                    continuation.resume(returning: nil)
+                    return
+                }
                 if let error = errorOrNil {
                     print("Error fetching sleep start date: \(error)")
                     continuation.resume(returning: nil)
@@ -240,15 +247,10 @@ final class HealthKitManager: ObservableObject {
                     continuation.resume(returning: nil)
                     return
                 }
-                // Look for recent sample with value inBed or asleep
-                for sample in samples {
-                    if sample.value == HKCategoryValueSleepAnalysis.inBed.rawValue ||
-                        sample.value == HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue {
-                        continuation.resume(returning: sample.startDate)
-                        return
-                    }
+                Task { @MainActor in
+                    let window = self.sleepSessionWindow(from: samples)
+                    continuation.resume(returning: window?.start)
                 }
-                continuation.resume(returning: nil)
             }
             healthStore.execute(query)
         }
@@ -258,11 +260,16 @@ final class HealthKitManager: ObservableObject {
     /// Returns nil if no suitable samples found.
     func latestSleepEndDate() async -> Date? {
         guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return nil }
-        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
-        let predicate = HKQuery.predicateForSamples(withStart: nil, end: Date(), options: .strictEndDate)
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        let lookbackStart = Date().addingTimeInterval(-sleepSampleLookback)
+        let predicate = HKQuery.predicateForSamples(withStart: lookbackStart, end: Date(), options: .strictStartDate)
         
         return await withCheckedContinuation { continuation in
-            let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: 100, sortDescriptors: [sortDescriptor]) { _, samplesOrNil, errorOrNil in
+            let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: [sortDescriptor]) { [weak self] _, samplesOrNil, errorOrNil in
+                guard let self = self else {
+                    continuation.resume(returning: nil)
+                    return
+                }
                 if let error = errorOrNil {
                     print("Error fetching sleep end date: \(error)")
                     continuation.resume(returning: nil)
@@ -272,15 +279,10 @@ final class HealthKitManager: ObservableObject {
                     continuation.resume(returning: nil)
                     return
                 }
-                // Look for recent sample with value inBed or asleep
-                for sample in samples {
-                    if sample.value == HKCategoryValueSleepAnalysis.inBed.rawValue ||
-                        sample.value == HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue {
-                        continuation.resume(returning: sample.endDate)
-                        return
-                    }
+                Task { @MainActor in
+                    let window = self.sleepSessionWindow(from: samples)
+                    continuation.resume(returning: window?.end)
                 }
-                continuation.resume(returning: nil)
             }
             healthStore.execute(query)
         }
@@ -312,8 +314,8 @@ final class HealthKitManager: ObservableObject {
 
     private func fetchLatestSleepSamples() async {
         guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return }
-        let eightHoursAgo = Date().addingTimeInterval(-8 * 60 * 60)
-        let predicate = HKQuery.predicateForSamples(withStart: eightHoursAgo, end: Date(), options: .strictStartDate)
+        let lookbackStart = Date().addingTimeInterval(-sleepSampleLookback)
+        let predicate = HKQuery.predicateForSamples(withStart: lookbackStart, end: Date(), options: .strictStartDate)
         let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
         
         await withCheckedContinuation { continuation in
@@ -352,17 +354,14 @@ final class HealthKitManager: ObservableObject {
     /// 
     /// Returns tuple of (isREM: Bool, description: String) for the last probable REM window.
     private func evaluateProbableREM(using sleepSamples: [HKCategorySample], and heartRateSamples: [HKQuantitySample]) -> (Bool, String) {
-        // 1. Find the last sleep start date of inBed or asleep
-        guard let sleepStartSample = sleepSamples.first(where: {
-            $0.value == HKCategoryValueSleepAnalysis.inBed.rawValue ||
-            $0.value == HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue
-        }) else {
+        // 1. Find the most recent sleep session window
+        guard let sleepWindow = sleepSessionWindow(from: sleepSamples) else {
             return (false, "No sleep start detected")
         }
-        let sleepStartDate = sleepStartSample.startDate
+        let sleepStartDate = sleepWindow.start
         
         // 2. Look for REM sleep samples if available
-        if let remSample = sleepSamples.last(where: { $0.value == HKCategoryValueSleepAnalysis.asleepREM.rawValue }) {
+        if let remSample = sleepSamples.last(where: { isREMValue($0.value) && $0.endDate >= sleepWindow.start && $0.startDate <= sleepWindow.end }) {
             // We have explicit REM sample - check recent heart rate near REM sample time
             let remStart = remSample.startDate
             let remEnd = remSample.endDate
@@ -453,5 +452,50 @@ final class HealthKitManager: ObservableObject {
     func stopMonitoring() {
         stopSleepMonitoring()
     }
-}
 
+    // MARK: - Sleep sample helpers
+
+    private let sleepSampleLookback: TimeInterval = 12 * 60 * 60
+    private let sleepSessionGap: TimeInterval = 30 * 60
+
+    private func isSleepValue(_ value: Int) -> Bool {
+        if value == HKCategoryValueSleepAnalysis.inBed.rawValue ||
+            value == HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue {
+            return true
+        }
+        if #available(watchOS 9.0, *) {
+            return value == HKCategoryValueSleepAnalysis.asleepCore.rawValue ||
+                value == HKCategoryValueSleepAnalysis.asleepDeep.rawValue ||
+                value == HKCategoryValueSleepAnalysis.asleepREM.rawValue
+        }
+        return false
+    }
+
+    private func isREMValue(_ value: Int) -> Bool {
+        if #available(watchOS 9.0, *) {
+            return value == HKCategoryValueSleepAnalysis.asleepREM.rawValue
+        }
+        return false
+    }
+
+    private func sleepSessionWindow(from samples: [HKCategorySample]) -> (start: Date, end: Date)? {
+        let sleepSamples = samples.filter { isSleepValue($0.value) }.sorted(by: { $0.startDate < $1.startDate })
+        guard let first = sleepSamples.first else { return nil }
+
+        var sessionStart = first.startDate
+        var sessionEnd = first.endDate
+
+        for sample in sleepSamples.dropFirst() {
+            if sample.startDate.timeIntervalSince(sessionEnd) > sleepSessionGap {
+                sessionStart = sample.startDate
+                sessionEnd = sample.endDate
+                continue
+            }
+            if sample.endDate > sessionEnd {
+                sessionEnd = sample.endDate
+            }
+        }
+
+        return (sessionStart, sessionEnd)
+    }
+}
