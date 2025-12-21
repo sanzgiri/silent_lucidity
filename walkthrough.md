@@ -64,6 +64,8 @@ To verify the new heuristics without sleeping for 8 hours:
     *   Adjust **Cue Interval** and verify cues are less frequent.
     *   Tap **Test Haptic** to verify cue delivery.
     *   Toggle **Require Stillness** and confirm the "Still:" indicator updates when you keep the watch motionless.
+5.  Open **History** after a short session:
+    *   Verify entries for session start/stop and REM detected/ended windows.
 
 **Simulator:**
 1.  Run on an Apple Watch simulator.

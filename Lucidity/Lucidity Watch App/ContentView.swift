@@ -27,21 +27,18 @@ struct ContentView: View {
 
                 VStack(spacing: 2) {
                     Text("HR: \(formattedHeartRate())")
-                        .font(.caption2)
                     Text("Last: \(formattedSleepWindow())")
-                        .font(.caption2)
                         .lineLimit(1)
                     Text("REM: \(health.lastSleepWindowDescription)")
-                        .font(.caption2)
                         .lineLimit(1)
                     Text("Cue: \(formattedLastCue())")
-                        .font(.caption2)
                         .lineLimit(1)
                     if requireStillness {
                         Text("Still: \(formattedStillness())")
-                            .font(.caption2)
                     }
                 }
+                .font(.caption2)
+                .minimumScaleFactor(0.8)
                 .foregroundColor(.secondary)
 
                 if !statusMessage.isEmpty {
@@ -72,6 +69,7 @@ struct ContentView: View {
                                         if !lowPowerMode {
                                             WorkoutSessionManager.shared.startOvernightSession()
                                         }
+                                        HistoryStore.shared.log(note: lowPowerMode ? "Session started (low power)" : "Session started")
 
                                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                                             statusMessage = lowPowerMode ? "Monitoring active (low power)" : "Monitoring active"
@@ -115,6 +113,7 @@ struct ContentView: View {
                             health.stopMonitoring()
                             haptics.stopCueing()
                             WorkoutSessionManager.shared.stopSession()
+                            HistoryStore.shared.log(note: "Session stopped")
 
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                                 statusMessage = ""

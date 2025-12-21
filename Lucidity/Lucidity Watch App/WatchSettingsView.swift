@@ -1,4 +1,5 @@
 import SwiftUI
+import WatchKit
 
 struct WatchSettingsView: View {
     @AppStorage(AppSettingsKeys.lowPowerMode) private var lowPowerMode: Bool = false
@@ -10,22 +11,44 @@ struct WatchSettingsView: View {
 
     var body: some View {
         Form {
-            Section(header: Text("Monitoring"), footer: Text("Low Power reduces cue cadence and skips workout sessions, which may delay heart rate updates.")) {
-                Toggle("Low Power", isOn: $lowPowerMode)
-                Toggle("Require Stillness", isOn: $requireStillness)
-                Stepper("Stillness: \(Int(stillnessMinutes)) min", value: $stillnessMinutes, in: 5...30)
-            }
-
-            Section(header: Text("Cues")) {
-                Stepper("Cue Interval: \(Int(cueIntervalSeconds))s", value: $cueIntervalSeconds, in: 30...180, step: 15)
-                Button("Test Haptic") {
-                    HapticCueManager.shared.deliverGentleCue()
+            Section(header: Text("Monitoring").font(.caption2),
+                    footer: Text("Low Power reduces cue cadence and skips workout sessions, which may delay heart rate updates.").font(.caption2)) {
+                Toggle(isOn: $lowPowerMode) {
+                    Text("Low Power").font(.caption2)
+                }
+                Toggle(isOn: $requireStillness) {
+                    Text("Require Stillness").font(.caption2)
+                }
+                Stepper(value: $stillnessMinutes, in: 5...30) {
+                    Text("Stillness: \(Int(stillnessMinutes)) min").font(.caption2)
                 }
             }
 
-            Section(header: Text("Signals")) {
-                Toggle("Use HRV", isOn: $useHRV)
-                Toggle("Use Respiratory", isOn: $useRespiratoryRate)
+            Section(header: Text("Cues").font(.caption2)) {
+                Stepper(value: $cueIntervalSeconds, in: 30...180, step: 15) {
+                    Text("Cue Interval: \(Int(cueIntervalSeconds))s").font(.caption2)
+                }
+                Button {
+                    let device = WKInterfaceDevice.current()
+                    device.play(.click)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        device.play(.start)
+                    }
+                    Task { @MainActor in
+                        HistoryStore.shared.log(note: "Test haptic")
+                    }
+                } label: {
+                    Text("Test Haptic").font(.caption2)
+                }
+            }
+
+            Section(header: Text("Signals").font(.caption2)) {
+                Toggle(isOn: $useHRV) {
+                    Text("Use HRV").font(.caption2)
+                }
+                Toggle(isOn: $useRespiratoryRate) {
+                    Text("Use Respiratory").font(.caption2)
+                }
             }
         }
         .navigationTitle("Settings")

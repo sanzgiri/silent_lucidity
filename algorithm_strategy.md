@@ -43,6 +43,9 @@ REM (Rapid Eye Movement) sleep is biologically characterized by two simultaneous
 *   Motion stillness must be maintained for a configurable duration (default 10 minutes).
 *   Can be disabled in settings to save battery or during testing.
 
+### 7. Session & REM Logging
+*   History logs session start/stop and REM transitions (start/end) with window timestamps for cross-checking.
+
 ## Prototype (DreamDetector)
 
 ### 1. Inputs

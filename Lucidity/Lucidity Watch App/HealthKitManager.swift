@@ -53,6 +53,10 @@ final class HealthKitManager: ObservableObject {
     private var latestHeartRateSamples: [HKQuantitySample] = []
     private var latestHRVDate: Date? = nil
     private var latestRespiratoryRateDate: Date? = nil
+    private var lastREMState: Bool? = nil
+    private var lastREMWindowStart: Date? = nil
+    private var lastREMWindowEnd: Date? = nil
+    private var lastREMWindowDescription: String? = nil
     
     static let remWindowDidChangeNotification = Notification.Name("REMWindowDidChange")
 
@@ -319,6 +323,10 @@ final class HealthKitManager: ObservableObject {
         self.latestRespiratoryRate = nil
         self.latestHRVDate = nil
         self.latestRespiratoryRateDate = nil
+        self.lastREMState = nil
+        self.lastREMWindowStart = nil
+        self.lastREMWindowEnd = nil
+        self.lastREMWindowDescription = nil
     }
 
     /// Convenience function to fetch the most recent sleep sample start date of "inBed" or "asleep".
@@ -450,19 +458,19 @@ final class HealthKitManager: ObservableObject {
     /// - Detect heart rate between 45 and 70 bpm as potential REM indication.
     /// 
     /// Returns tuple of (isREM: Bool, description: String) for the last probable REM window.
-    private func evaluateProbableREM(using sleepSamples: [HKCategorySample], and heartRateSamples: [HKQuantitySample]) -> (Bool, String) {
+    private func evaluateProbableREM(using sleepSamples: [HKCategorySample], and heartRateSamples: [HKQuantitySample]) -> REMResult {
         let now = Date()
 
         // 1. Find the most recent sleep session window
         guard let sleepWindow = sleepSessionWindow(from: sleepSamples) else {
-            return (false, "No sleep start detected")
+            return REMResult(isREM: false, description: "No sleep start detected", windowStart: nil, windowEnd: nil)
         }
 
         let requireStillness = AppSettings.requireStillness
         let motionMonitor = MotionSleepMonitor.shared
         let isStillEnough = !requireStillness || !motionMonitor.isMonitoring || motionMonitor.isStillForSleep
         if !isStillEnough {
-            return (false, "Not still enough for sleep")
+            return REMResult(isREM: false, description: "Not still enough for sleep", windowStart: nil, windowEnd: nil)
         }
 
         let hrRange = heartRateRange(from: heartRateSamples, sleepWindow: sleepWindow, now: now)
@@ -486,21 +494,21 @@ final class HealthKitManager: ObservableObject {
                     formatter.dateStyle = .none
                     formatter.timeStyle = .short
                     let intervalString = formatter.string(from: remStart, to: remEnd)
-                    return (true, "Detected REM window: \(intervalString)")
+                    return REMResult(isREM: true, description: "Detected REM window: \(intervalString)", windowStart: remStart, windowEnd: remEnd)
                 }
-                return (false, "REM stage detected but signals not supportive")
+                return REMResult(isREM: false, description: "REM stage detected but signals not supportive", windowStart: remStart, windowEnd: remEnd)
             }
         }
 
         // 3. If no explicit REM samples, approximate cycles every ~90 minutes from sleep start date.
         let elapsedTime = now.timeIntervalSince(sleepWindow.start)
         guard elapsedTime > 0 else {
-            return (false, "Sleep start in future or no elapsed time")
+            return REMResult(isREM: false, description: "Sleep start in future or no elapsed time", windowStart: nil, windowEnd: nil)
         }
 
         let inferredWindow = inferredRemWindow(sleepStartDate: sleepWindow.start, now: now)
         if now < inferredWindow.start {
-            return (false, "No REM window yet")
+            return REMResult(isREM: false, description: "No REM window yet", windowStart: inferredWindow.start, windowEnd: inferredWindow.end)
         }
 
         let hrSamplesInWindow = overlappingSamples(in: heartRateSamples, start: inferredWindow.start, end: inferredWindow.end)
@@ -515,25 +523,32 @@ final class HealthKitManager: ObservableObject {
         let intervalString = formatter.string(from: inferredWindow.start, to: inferredWindow.end)
 
         if isHeartRateInREMRange && supportOK {
-            return (true, "Approximated REM window: \(intervalString)")
+            return REMResult(isREM: true, description: "Approximated REM window: \(intervalString)", windowStart: inferredWindow.start, windowEnd: inferredWindow.end)
         }
-        return (false, "No REM detected in approximated window: \(intervalString)")
+        return REMResult(isREM: false, description: "No REM detected in approximated window: \(intervalString)", windowStart: inferredWindow.start, windowEnd: inferredWindow.end)
     }
 
     /// Fetches latest samples and evaluates REM windows, updating published properties and posting notifications.
     @MainActor
     private func evaluateAndPublish() async {
-        let (isREM, description) = evaluateProbableREM(using: latestSleepSamples, and: latestHeartRateSamples)
+        let result = evaluateProbableREM(using: latestSleepSamples, and: latestHeartRateSamples)
         
         // Last heart rate sample for UI
         let lastHRBPM: Double? = latestHeartRateSamples.last.map {
             $0.quantity.doubleValue(for: HKUnit.count().unitDivided(by: HKUnit.minute()))
         }
         
-        self.lastSleepWindowDescription = description
+        self.lastSleepWindowDescription = result.description
         self.latestHeartRate = lastHRBPM
+
+        logREMTransitionIfNeeded(result: result)
         
-        NotificationCenter.default.post(name: HealthKitManager.remWindowDidChangeNotification, object: nil, userInfo: ["isREM": isREM])
+        NotificationCenter.default.post(name: HealthKitManager.remWindowDidChangeNotification,
+                                        object: nil,
+                                        userInfo: ["isREM": result.isREM,
+                                                   "description": result.description,
+                                                   "windowStart": result.windowStart as Any,
+                                                   "windowEnd": result.windowEnd as Any])
     }
     
     /// Starts the monitoring of health data (stub or reuse existing startSleepMonitoring)
@@ -562,6 +577,13 @@ final class HealthKitManager: ObservableObject {
         let hrvSupport: Bool
         let respAvailable: Bool
         let respSupport: Bool
+    }
+
+    private struct REMResult {
+        let isREM: Bool
+        let description: String
+        let windowStart: Date?
+        let windowEnd: Date?
     }
 
     private func updateLatestHRV(from samplesOrNil: [HKSample]?) {
@@ -662,6 +684,45 @@ final class HealthKitManager: ObservableObject {
         let lower = max(40, median - 10)
         let upper = min(90, median + 15)
         return lower...upper
+    }
+
+    private func logREMTransitionIfNeeded(result: REMResult) {
+        defer {
+            lastREMState = result.isREM
+            if result.isREM {
+                lastREMWindowStart = result.windowStart
+                lastREMWindowEnd = result.windowEnd
+                lastREMWindowDescription = result.description
+            }
+        }
+
+        guard let lastState = lastREMState, lastState != result.isREM else {
+            return
+        }
+
+        if result.isREM {
+            let intervalText = formattedInterval(start: result.windowStart, end: result.windowEnd)
+            let note = intervalText.map { "REM detected: \($0)" } ?? "REM detected"
+            HistoryStore.shared.log(note: note)
+            return
+        }
+
+        if let lastStart = lastREMWindowStart, let lastEnd = lastREMWindowEnd,
+           let intervalText = formattedInterval(start: lastStart, end: lastEnd) {
+            HistoryStore.shared.log(note: "REM ended: \(intervalText)")
+        } else if let lastDescription = lastREMWindowDescription {
+            HistoryStore.shared.log(note: "REM ended: \(lastDescription)")
+        } else {
+            HistoryStore.shared.log(note: "REM ended")
+        }
+    }
+
+    private func formattedInterval(start: Date?, end: Date?) -> String? {
+        guard let start = start, let end = end else { return nil }
+        let formatter = DateIntervalFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter.string(from: start, to: end)
     }
 
     private func isSleepValue(_ value: Int) -> Bool {
