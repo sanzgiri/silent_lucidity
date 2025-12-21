@@ -8,6 +8,9 @@ struct WatchSettingsView: View {
     @AppStorage(AppSettingsKeys.cueIntervalSeconds) private var cueIntervalSeconds: Double = AppSettings.defaultCueIntervalSeconds
     @AppStorage(AppSettingsKeys.useHRV) private var useHRV: Bool = true
     @AppStorage(AppSettingsKeys.useRespiratoryRate) private var useRespiratoryRate: Bool = true
+    @AppStorage(AppSettingsKeys.hapticPulseCount) private var hapticPulseCount: Int = AppSettings.defaultHapticPulseCount
+    @AppStorage(AppSettingsKeys.hapticPulseInterval) private var hapticPulseInterval: Double = AppSettings.defaultHapticPulseInterval
+    @AppStorage(AppSettingsKeys.hapticPatternType) private var hapticPatternType: String = AppSettings.defaultHapticPatternType.rawValue
 
     var body: some View {
         Form {
@@ -28,15 +31,20 @@ struct WatchSettingsView: View {
                 Stepper(value: $cueIntervalSeconds, in: 30...180, step: 15) {
                     Text("Cue Interval: \(Int(cueIntervalSeconds))s").font(.caption2)
                 }
+                Stepper(value: $hapticPulseCount, in: 3...15) {
+                    Text("Pulse Count: \(hapticPulseCount)").font(.caption2)
+                }
+                Stepper(value: $hapticPulseInterval, in: 0.2...0.4, step: 0.05) {
+                    Text("Pulse Interval: \(formattedPulseInterval())s").font(.caption2)
+                }
+                Picker("Haptic Type", selection: $hapticPatternType) {
+                    ForEach(HapticPatternType.allCases) { pattern in
+                        Text(pattern.label).tag(pattern.rawValue)
+                    }
+                }
+                .font(.caption2)
                 Button {
-                    let device = WKInterfaceDevice.current()
-                    device.play(.click)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        device.play(.start)
-                    }
-                    Task { @MainActor in
-                        HistoryStore.shared.log(note: "Test haptic")
-                    }
+                    HapticCueManager.shared.deliverGentleCue(note: "Test haptic")
                 } label: {
                     Text("Test Haptic").font(.caption2)
                 }
@@ -52,6 +60,10 @@ struct WatchSettingsView: View {
             }
         }
         .navigationTitle("Settings")
+    }
+
+    private func formattedPulseInterval() -> String {
+        String(format: "%.2f", hapticPulseInterval)
     }
 }
 

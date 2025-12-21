@@ -62,6 +62,7 @@ To verify the new heuristics without sleeping for 8 hours:
 4.  Open **Settings**:
     *   Toggle **Low Power** on and restart monitoring; confirm the status shows "low power."
     *   Adjust **Cue Interval** and verify cues are less frequent.
+    *   Adjust **Pulse Count**, **Pulse Interval**, and **Haptic Type** to match your desired detectability.
     *   Tap **Test Haptic** to verify cue delivery.
     *   Toggle **Require Stillness** and confirm the "Still:" indicator updates when you keep the watch motionless.
 5.  Open **History** after a short session:

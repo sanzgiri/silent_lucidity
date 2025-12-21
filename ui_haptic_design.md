@@ -9,7 +9,8 @@ The watch app uses a gentle, repeating cue during REM windows.
 *   **Cadence**: Configurable interval (default ~30s); throttled so cues do not fire too frequently.
 *   **Suppression**: Cues are suppressed while the app is active to avoid waking the user.
 *   **Low Power Mode**: Increases cue interval and can skip workout sessions to reduce battery drain.
-*   **Test Haptic**: A settings control triggers a sample cue for verification.
+*   **Pulse Configuration**: Pulse count, interval, and haptic type (click/start) are configurable and apply to both cues and Test Haptic.
+*   **Test Haptic**: A settings control triggers the current pulse pattern for verification.
 
 ## 2. Prototype Cueing (DreamDetector)
 The prototype uses a stronger "totem" pattern designed to be unmistakable.

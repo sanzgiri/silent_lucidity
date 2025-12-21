@@ -106,18 +106,35 @@ final class HapticCueManager: ObservableObject {
     }
 
     /// Plays a gentle haptic cue to the user.
-    /// Uses a `.click` haptic and optionally `.start` for subtlety.
-    func deliverGentleCue() {
+    /// Uses the configured pattern for pulse count, interval, and type.
+    func deliverGentleCue(note: String? = "Cue delivered") {
         let device = WKInterfaceDevice.current()
-        device.play(.click)
-        // Optionally add a subtle secondary haptic for minimal intrusiveness
-        if #available(watchOS 6.0, *) {
-            device.play(.start)
+        let pulseCount = AppSettings.hapticPulseCount
+        let pulseInterval = AppSettings.hapticPulseInterval
+        let secondaryDelay = min(0.12, pulseInterval * 0.5)
+        let pattern = AppSettings.hapticPatternType
+
+        for index in 0..<pulseCount {
+            let delay = TimeInterval(index) * pulseInterval
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                switch pattern {
+                case .clickOnly:
+                    device.play(.click)
+                case .startOnly:
+                    device.play(.start)
+                case .clickAndStart:
+                    device.play(.click)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + secondaryDelay) {
+                        device.play(.start)
+                    }
+                }
+            }
         }
 
-        // Log the cue delivery to history
-        Task { @MainActor in
-            HistoryStore.shared.log(note: "Cue delivered")
+        if let note = note {
+            Task { @MainActor in
+                HistoryStore.shared.log(note: note)
+            }
         }
     }
 }
