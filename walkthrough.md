@@ -59,6 +59,11 @@ To verify the new heuristics without sleeping for 8 hours:
     *   HealthKit authorization prompt appears.
     *   Status changes to "Monitoring active" and heart rate starts updating.
     *   Workout indicator appears on the watch face (background execution).
+4.  Open **Settings**:
+    *   Toggle **Low Power** on and restart monitoring; confirm the status shows "low power."
+    *   Adjust **Cue Interval** and verify cues are less frequent.
+    *   Tap **Test Haptic** to verify cue delivery.
+    *   Toggle **Require Stillness** and confirm the "Still:" indicator updates when you keep the watch motionless.
 
 **Simulator:**
 1.  Run on an Apple Watch simulator.

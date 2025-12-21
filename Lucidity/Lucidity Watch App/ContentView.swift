@@ -11,7 +11,10 @@ import Combine
 
 struct ContentView: View {
     @StateObject private var health = HealthKitManager.shared
-    @StateObject private var haptics = HapticCueManager()
+    @ObservedObject private var haptics = HapticCueManager.shared
+    @ObservedObject private var motion = MotionSleepMonitor.shared
+    @AppStorage(AppSettingsKeys.lowPowerMode) private var lowPowerMode: Bool = false
+    @AppStorage(AppSettingsKeys.requireStillness) private var requireStillness: Bool = true
     @State private var isMonitoring = false
     @State private var statusMessage = ""
 
@@ -28,6 +31,16 @@ struct ContentView: View {
                     Text("Last: \(formattedSleepWindow())")
                         .font(.caption2)
                         .lineLimit(1)
+                    Text("REM: \(health.lastSleepWindowDescription)")
+                        .font(.caption2)
+                        .lineLimit(1)
+                    Text("Cue: \(formattedLastCue())")
+                        .font(.caption2)
+                        .lineLimit(1)
+                    if requireStillness {
+                        Text("Still: \(formattedStillness())")
+                            .font(.caption2)
+                    }
                 }
                 .foregroundColor(.secondary)
 
@@ -49,12 +62,19 @@ struct ContentView: View {
                                 Task { @MainActor in
                                     if success {
                                         statusMessage = "Starting..."
+                                        if requireStillness {
+                                            motion.start()
+                                        } else {
+                                            motion.stop()
+                                        }
                                         health.startMonitoring()
                                         haptics.startCueing()
-                                        WorkoutSessionManager.shared.startOvernightSession()
+                                        if !lowPowerMode {
+                                            WorkoutSessionManager.shared.startOvernightSession()
+                                        }
 
                                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                            statusMessage = "Monitoring active"
+                                            statusMessage = lowPowerMode ? "Monitoring active (low power)" : "Monitoring active"
                                         }
                                     } else {
                                         if let nsError = error as NSError? {
@@ -91,6 +111,7 @@ struct ContentView: View {
                         Task { @MainActor in
                             isMonitoring = false
                             statusMessage = "Stopped"
+                            motion.stop()
                             health.stopMonitoring()
                             haptics.stopCueing()
                             WorkoutSessionManager.shared.stopSession()
@@ -114,6 +135,11 @@ struct ContentView: View {
                 }
                 .font(.caption2)
                 .padding(.top, 2)
+
+                NavigationLink("Settings") {
+                    WatchSettingsView()
+                }
+                .font(.caption2)
             }
             .padding(6)
         }
@@ -142,6 +168,17 @@ struct ContentView: View {
             return String(format: "%.0f", hr)
         }
         return "--"
+    }
+
+    private func formattedLastCue() -> String {
+        guard let date = haptics.lastCueDate else { return "None" }
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    private func formattedStillness() -> String {
+        return String(format: "%.0f min", motion.stillnessMinutes)
     }
 }
 

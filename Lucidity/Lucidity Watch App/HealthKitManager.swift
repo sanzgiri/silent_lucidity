@@ -10,7 +10,8 @@ import Combine
 /// - This implementation uses heuristics and limited HealthKit data to estimate REM windows.
 /// - It is intended for wellness and general awareness only, NOT for medical diagnosis or treatment.
 /// - Sleep stage data available from HealthKit is limited; detailed sleep staging (like polysomnography) is not available.
-/// - Heart rate variability (HRV) data is not incorporated here; HRV would improve REM detection.
+/// - Heart rate variability (HRV) and respiratory rate are used when available to improve REM detection.
+/// - Motion stillness is used as a sleep gate when enabled.
 /// - Changes to published properties are dispatched to the main thread for UI safety.
 /// - NotificationCenter posts "REMWindowDidChange" notifications with ["isREM": Bool] in userInfo whenever REM evaluation updates.
 final class HealthKitManager: ObservableObject {
@@ -30,6 +31,12 @@ final class HealthKitManager: ObservableObject {
     
     /// The most recent heart rate sample value in beats per minute.
     @Published var latestHeartRate: Double? = nil
+
+    /// The most recent heart rate variability (SDNN) in milliseconds.
+    @Published private(set) var latestHRV: Double? = nil
+
+    /// The most recent respiratory rate in breaths per minute.
+    @Published private(set) var latestRespiratoryRate: Double? = nil
     
     /// The most recent sleep window description for REM detection.
     @Published private(set) var lastSleepWindowDescription: String = "No REM window detected"
@@ -37,9 +44,15 @@ final class HealthKitManager: ObservableObject {
     private var sleepObserverQuery: HKObserverQuery?
     private var heartRateAnchoredQuery: HKAnchoredObjectQuery?
     private var heartRateAnchor: HKQueryAnchor?
+    private var hrvAnchoredQuery: HKAnchoredObjectQuery?
+    private var hrvAnchor: HKQueryAnchor?
+    private var respiratoryAnchoredQuery: HKAnchoredObjectQuery?
+    private var respiratoryAnchor: HKQueryAnchor?
     
     private var latestSleepSamples: [HKCategorySample] = []
     private var latestHeartRateSamples: [HKQuantitySample] = []
+    private var latestHRVDate: Date? = nil
+    private var latestRespiratoryRateDate: Date? = nil
     
     static let remWindowDidChangeNotification = Notification.Name("REMWindowDidChange")
 
@@ -70,10 +83,16 @@ final class HealthKitManager: ObservableObject {
             }
             return
         }
-        let toRead: Set<HKObjectType> = [
+        var toRead: Set<HKObjectType> = [
             sleepType,
             heartRateType
         ]
+        if let hrvType = HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
+            toRead.insert(hrvType)
+        }
+        if let respiratoryType = HKObjectType.quantityType(forIdentifier: .respiratoryRate) {
+            toRead.insert(respiratoryType)
+        }
         healthStore.requestAuthorization(toShare: toShare, read: toRead) { [weak self] success, error in
             print("HealthKit authorization result: success=\(success), error=\(String(describing: error))")
             Task { @MainActor in
@@ -194,6 +213,70 @@ final class HealthKitManager: ObservableObject {
             healthStore.execute(heartRateAnchoredQuery)
             print("Heart rate anchored query started")
         }
+
+        if let hrvType = HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
+            let hrvPredicate = predicate
+            hrvAnchoredQuery = HKAnchoredObjectQuery(type: hrvType, predicate: hrvPredicate, anchor: hrvAnchor, limit: HKObjectQueryNoLimit) { [weak self] _, samplesOrNil, _, newAnchor, errorOrNil in
+                guard let self = self else { return }
+                if let error = errorOrNil {
+                    print("Error in HRV query: \(error)")
+                    return
+                }
+                Task { @MainActor in
+                    self.updateLatestHRV(from: samplesOrNil)
+                    self.hrvAnchor = newAnchor
+                    await self.evaluateAndPublish()
+                }
+            }
+            if let hrvAnchoredQuery = hrvAnchoredQuery {
+                hrvAnchoredQuery.updateHandler = { [weak self] _, samplesOrNil, _, newAnchor, errorOrNil in
+                    guard let self = self else { return }
+                    if let error = errorOrNil {
+                        print("Error in HRV update: \(error)")
+                        return
+                    }
+                    Task { @MainActor in
+                        self.updateLatestHRV(from: samplesOrNil)
+                        self.hrvAnchor = newAnchor
+                        await self.evaluateAndPublish()
+                    }
+                }
+                healthStore.execute(hrvAnchoredQuery)
+                print("HRV anchored query started")
+            }
+        }
+
+        if let respiratoryType = HKObjectType.quantityType(forIdentifier: .respiratoryRate) {
+            let respiratoryPredicate = predicate
+            respiratoryAnchoredQuery = HKAnchoredObjectQuery(type: respiratoryType, predicate: respiratoryPredicate, anchor: respiratoryAnchor, limit: HKObjectQueryNoLimit) { [weak self] _, samplesOrNil, _, newAnchor, errorOrNil in
+                guard let self = self else { return }
+                if let error = errorOrNil {
+                    print("Error in respiratory rate query: \(error)")
+                    return
+                }
+                Task { @MainActor in
+                    self.updateLatestRespiratoryRate(from: samplesOrNil)
+                    self.respiratoryAnchor = newAnchor
+                    await self.evaluateAndPublish()
+                }
+            }
+            if let respiratoryAnchoredQuery = respiratoryAnchoredQuery {
+                respiratoryAnchoredQuery.updateHandler = { [weak self] _, samplesOrNil, _, newAnchor, errorOrNil in
+                    guard let self = self else { return }
+                    if let error = errorOrNil {
+                        print("Error in respiratory rate update: \(error)")
+                        return
+                    }
+                    Task { @MainActor in
+                        self.updateLatestRespiratoryRate(from: samplesOrNil)
+                        self.respiratoryAnchor = newAnchor
+                        await self.evaluateAndPublish()
+                    }
+                }
+                healthStore.execute(respiratoryAnchoredQuery)
+                print("Respiratory rate anchored query started")
+            }
+        }
         
         // Initial fetch trigger
         Task {
@@ -215,6 +298,16 @@ final class HealthKitManager: ObservableObject {
             self.heartRateAnchoredQuery = nil
             self.heartRateAnchor = nil
         }
+        if let hrvAnchoredQuery = hrvAnchoredQuery {
+            healthStore.stop(hrvAnchoredQuery)
+            self.hrvAnchoredQuery = nil
+            self.hrvAnchor = nil
+        }
+        if let respiratoryAnchoredQuery = respiratoryAnchoredQuery {
+            healthStore.stop(respiratoryAnchoredQuery)
+            self.respiratoryAnchoredQuery = nil
+            self.respiratoryAnchor = nil
+        }
         
         // Clear cached data
         self.latestSleepSamples.removeAll()
@@ -222,6 +315,10 @@ final class HealthKitManager: ObservableObject {
         
         self.lastSleepWindowDescription = "No REM window detected"
         self.latestHeartRate = nil
+        self.latestHRV = nil
+        self.latestRespiratoryRate = nil
+        self.latestHRVDate = nil
+        self.latestRespiratoryRateDate = nil
     }
 
     /// Convenience function to fetch the most recent sleep sample start date of "inBed" or "asleep".
@@ -354,76 +451,73 @@ final class HealthKitManager: ObservableObject {
     /// 
     /// Returns tuple of (isREM: Bool, description: String) for the last probable REM window.
     private func evaluateProbableREM(using sleepSamples: [HKCategorySample], and heartRateSamples: [HKQuantitySample]) -> (Bool, String) {
+        let now = Date()
+
         // 1. Find the most recent sleep session window
         guard let sleepWindow = sleepSessionWindow(from: sleepSamples) else {
             return (false, "No sleep start detected")
         }
-        let sleepStartDate = sleepWindow.start
-        
-        // 2. Look for REM sleep samples if available
+
+        let requireStillness = AppSettings.requireStillness
+        let motionMonitor = MotionSleepMonitor.shared
+        let isStillEnough = !requireStillness || !motionMonitor.isMonitoring || motionMonitor.isStillForSleep
+        if !isStillEnough {
+            return (false, "Not still enough for sleep")
+        }
+
+        let hrRange = heartRateRange(from: heartRateSamples, sleepWindow: sleepWindow, now: now)
+        let support = supportSignals(now: now)
+        let supportAvailable = support.hrvAvailable || support.respAvailable
+        let supportOK = !supportAvailable || support.hrvSupport || support.respSupport
+
+        // 2. Look for REM sleep samples if available and current
         if let remSample = sleepSamples.last(where: { isREMValue($0.value) && $0.endDate >= sleepWindow.start && $0.startDate <= sleepWindow.end }) {
-            // We have explicit REM sample - check recent heart rate near REM sample time
             let remStart = remSample.startDate
             let remEnd = remSample.endDate
-            
-            // Find heart rate samples overlapping with REM window
-            let hrSamplesDuringREM = heartRateSamples.filter { sample in
-                sample.startDate <= remEnd && sample.endDate >= remStart
-            }
-            // Check if any heart rate during REM window is between 45 and 70 bpm
-            let isHeartRateInREMRange = hrSamplesDuringREM.contains { sample in
-                let bpm = sample.quantity.doubleValue(for: HKUnit.count().unitDivided(by: HKUnit.minute()))
-                return bpm >= 45 && bpm <= 70
-            }
-            if isHeartRateInREMRange {
-                let formatter = DateIntervalFormatter()
-                formatter.dateStyle = .none
-                formatter.timeStyle = .short
-                let intervalString = formatter.string(from: remStart, to: remEnd)
-                return (true, "Detected REM window: \(intervalString)")
-            } else {
-                return (false, "REM stage detected but heart rate not in REM range")
+            let isCurrent = now <= remEnd.addingTimeInterval(remSampleGracePeriod)
+            if isCurrent {
+                let hrSamplesDuringREM = overlappingSamples(in: heartRateSamples, start: remStart, end: remEnd)
+                let isHeartRateInREMRange = hrSamplesDuringREM.contains { sample in
+                    let bpm = sample.quantity.doubleValue(for: HKUnit.count().unitDivided(by: HKUnit.minute()))
+                    return hrRange.contains(bpm)
+                }
+                if isHeartRateInREMRange || supportOK {
+                    let formatter = DateIntervalFormatter()
+                    formatter.dateStyle = .none
+                    formatter.timeStyle = .short
+                    let intervalString = formatter.string(from: remStart, to: remEnd)
+                    return (true, "Detected REM window: \(intervalString)")
+                }
+                return (false, "REM stage detected but signals not supportive")
             }
         }
-        
+
         // 3. If no explicit REM samples, approximate cycles every ~90 minutes from sleep start date.
-        // We'll check the last cycle window and heart rate in that window.
-        let now = Date()
-        let interval: TimeInterval = 90 * 60
-        
-        let elapsedTime = now.timeIntervalSince(sleepStartDate)
+        let elapsedTime = now.timeIntervalSince(sleepWindow.start)
         guard elapsedTime > 0 else {
             return (false, "Sleep start in future or no elapsed time")
         }
-        
-        // Number of full cycles elapsed
-        let cyclesElapsed = Int(elapsedTime / interval)
-        // Last cycle start
-        let lastCycleStart = sleepStartDate.addingTimeInterval(TimeInterval(cyclesElapsed) * interval)
-        // Assume REM in last 20 minutes of cycle
-        let remWindowStart = lastCycleStart.addingTimeInterval(interval - 20 * 60)
-        let remWindowEnd = lastCycleStart.addingTimeInterval(interval)
-        
-        // Check heart rate samples in this window
-        let hrSamplesInWindow = heartRateSamples.filter { sample in
-            sample.startDate >= remWindowStart && sample.endDate <= remWindowEnd
+
+        let inferredWindow = inferredRemWindow(sleepStartDate: sleepWindow.start, now: now)
+        if now < inferredWindow.start {
+            return (false, "No REM window yet")
         }
-        
+
+        let hrSamplesInWindow = overlappingSamples(in: heartRateSamples, start: inferredWindow.start, end: inferredWindow.end)
         let isHeartRateInREMRange = hrSamplesInWindow.contains { sample in
             let bpm = sample.quantity.doubleValue(for: HKUnit.count().unitDivided(by: HKUnit.minute()))
-            return bpm >= 45 && bpm <= 70
+            return hrRange.contains(bpm)
         }
-        
+
         let formatter = DateIntervalFormatter()
         formatter.dateStyle = .none
         formatter.timeStyle = .short
-        let intervalString = formatter.string(from: remWindowStart, to: remWindowEnd)
-        
-        if isHeartRateInREMRange {
+        let intervalString = formatter.string(from: inferredWindow.start, to: inferredWindow.end)
+
+        if isHeartRateInREMRange && supportOK {
             return (true, "Approximated REM window: \(intervalString)")
-        } else {
-            return (false, "No REM detected in approximated window: \(intervalString)")
         }
+        return (false, "No REM detected in approximated window: \(intervalString)")
     }
 
     /// Fetches latest samples and evaluates REM windows, updating published properties and posting notifications.
@@ -457,6 +551,118 @@ final class HealthKitManager: ObservableObject {
 
     private let sleepSampleLookback: TimeInterval = 12 * 60 * 60
     private let sleepSessionGap: TimeInterval = 30 * 60
+    private let remCycleInterval: TimeInterval = 90 * 60
+    private let remWindowDuration: TimeInterval = 20 * 60
+    private let remSampleGracePeriod: TimeInterval = 10 * 60
+    private let heartRateRangeLookback: TimeInterval = 2 * 60 * 60
+    private let supportSignalRecency: TimeInterval = 30 * 60
+
+    private struct SupportSignalSummary {
+        let hrvAvailable: Bool
+        let hrvSupport: Bool
+        let respAvailable: Bool
+        let respSupport: Bool
+    }
+
+    private func updateLatestHRV(from samplesOrNil: [HKSample]?) {
+        guard let samples = samplesOrNil as? [HKQuantitySample],
+              let last = samples.max(by: { $0.endDate < $1.endDate }) else {
+            return
+        }
+        let unit = HKUnit.secondUnit(with: .milli)
+        latestHRV = last.quantity.doubleValue(for: unit)
+        latestHRVDate = last.endDate
+    }
+
+    private func updateLatestRespiratoryRate(from samplesOrNil: [HKSample]?) {
+        guard let samples = samplesOrNil as? [HKQuantitySample],
+              let last = samples.max(by: { $0.endDate < $1.endDate }) else {
+            return
+        }
+        let unit = HKUnit.count().unitDivided(by: HKUnit.minute())
+        latestRespiratoryRate = last.quantity.doubleValue(for: unit)
+        latestRespiratoryRateDate = last.endDate
+    }
+
+    private func supportSignals(now: Date) -> SupportSignalSummary {
+        let useHRV = AppSettings.useHRV
+        let useRespiratory = AppSettings.useRespiratoryRate
+
+        let hrvAvailable = useHRV && isSampleRecent(latestHRVDate, now: now, within: supportSignalRecency)
+        let respAvailable = useRespiratory && isSampleRecent(latestRespiratoryRateDate, now: now, within: supportSignalRecency)
+
+        let hrvSupport = hrvAvailable && isHRVSupportive()
+        let respSupport = respAvailable && isRespiratorySupportive()
+
+        return SupportSignalSummary(hrvAvailable: hrvAvailable,
+                                    hrvSupport: hrvSupport,
+                                    respAvailable: respAvailable,
+                                    respSupport: respSupport)
+    }
+
+    private func isSampleRecent(_ date: Date?, now: Date, within interval: TimeInterval) -> Bool {
+        guard let date = date else { return false }
+        return now.timeIntervalSince(date) <= interval
+    }
+
+    private func isHRVSupportive() -> Bool {
+        guard let hrv = latestHRV else { return false }
+        return hrv >= 20 && hrv <= 120
+    }
+
+    private func isRespiratorySupportive() -> Bool {
+        guard let rate = latestRespiratoryRate else { return false }
+        return rate >= 8 && rate <= 20
+    }
+
+    private func inferredRemWindow(sleepStartDate: Date, now: Date) -> (start: Date, end: Date) {
+        let elapsedTime = now.timeIntervalSince(sleepStartDate)
+        let cyclesElapsed = max(0, Int(elapsedTime / remCycleInterval))
+        let currentCycleStart = sleepStartDate.addingTimeInterval(TimeInterval(cyclesElapsed) * remCycleInterval)
+        let currentRemStart = currentCycleStart.addingTimeInterval(remCycleInterval - remWindowDuration)
+        let currentRemEnd = currentCycleStart.addingTimeInterval(remCycleInterval)
+
+        if now < currentRemStart, cyclesElapsed > 0 {
+            let previousCycleStart = currentCycleStart.addingTimeInterval(-remCycleInterval)
+            let previousRemStart = previousCycleStart.addingTimeInterval(remCycleInterval - remWindowDuration)
+            let previousRemEnd = previousCycleStart.addingTimeInterval(remCycleInterval)
+            return (previousRemStart, previousRemEnd)
+        }
+
+        return (currentRemStart, currentRemEnd)
+    }
+
+    private func overlappingSamples(in samples: [HKQuantitySample], start: Date, end: Date) -> [HKQuantitySample] {
+        samples.filter { $0.startDate <= end && $0.endDate >= start }
+    }
+
+    private func heartRateRange(from samples: [HKQuantitySample], sleepWindow: (start: Date, end: Date), now: Date) -> ClosedRange<Double> {
+        let rangeStart = max(sleepWindow.start, now.addingTimeInterval(-heartRateRangeLookback))
+        let rangeEnd = min(sleepWindow.end, now)
+        let windowSamples = overlappingSamples(in: samples, start: rangeStart, end: rangeEnd)
+
+        guard windowSamples.count >= 10 else {
+            return 45...70
+        }
+
+        let unit = HKUnit.count().unitDivided(by: HKUnit.minute())
+        let sortedValues = windowSamples
+            .map { $0.quantity.doubleValue(for: unit) }
+            .sorted()
+
+        let count = sortedValues.count
+        let mid = count / 2
+        let median: Double
+        if count % 2 == 0 {
+            median = (sortedValues[mid - 1] + sortedValues[mid]) / 2
+        } else {
+            median = sortedValues[mid]
+        }
+
+        let lower = max(40, median - 10)
+        let upper = min(90, median + 15)
+        return lower...upper
+    }
 
     private func isSleepValue(_ value: Int) -> Bool {
         if value == HKCategoryValueSleepAnalysis.inBed.rawValue ||

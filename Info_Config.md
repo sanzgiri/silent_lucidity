@@ -10,7 +10,11 @@ To ensure the app runs correctly in the background and has access to necessary s
     *   **Key**: `NSHealthUpdateUsageDescription`
     *   **Value**: "We use workout sessions to keep the app alive while you sleep."
 
-2.  **Background Modes**
+2.  **Motion Usage (Stillness Gate)**
+    *   **Key**: `NSMotionUsageDescription`
+    *   **Value**: "We use motion sensors to detect stillness during sleep for better REM detection."
+
+3.  **Background Modes**
     *   **Key**: `WKBackgroundModes` (Array)
     *   **Item 0**: `workout-processing`
 
@@ -24,3 +28,4 @@ To ensure the app runs correctly in the background and has access to necessary s
 6.  Click **+ Capability**.
 7.  Add **HealthKit**.
 8.  Add **Background Modes** and check **Workout Processing**.
+9.  Add **Motion & Fitness** if required by your provisioning profile.

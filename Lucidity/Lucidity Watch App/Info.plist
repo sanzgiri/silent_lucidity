@@ -25,6 +25,8 @@
     <string>This app uses background sleep tracking to monitor sleep stages and improve haptic cue timing for lucid dreaming.</string>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>This app uses Bluetooth to connect to external heart rate sensors for accurate heart rate monitoring.</string>
+    <key>NSMotionUsageDescription</key>
+    <string>This app uses motion sensors to detect stillness during sleep for better REM detection.</string>
 
     <key>UIBackgroundModes</key>
     <array>
@@ -46,6 +48,8 @@
     <array>
         <string>HKCategoryTypeIdentifierSleepAnalysis</string>
         <string>HKQuantityTypeIdentifierHeartRate</string>
+        <string>HKQuantityTypeIdentifierHeartRateVariabilitySDNN</string>
+        <string>HKQuantityTypeIdentifierRespiratoryRate</string>
     </array>
 </dict>
 </plist>

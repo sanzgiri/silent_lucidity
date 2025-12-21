@@ -6,7 +6,7 @@ import Combine
 /// Manages haptic cues related to REM window changes.
 /// 
 /// - Important:
-///   - This class throttles haptic cues to no more than one every 20 seconds.
+///   - This class throttles haptic cues using the configured interval settings.
 ///   - Cues are suppressed when the app is active (i.e., display is awake and user is interacting).
 ///   - Use the shared singleton instance to access and control cueing.
 final class HapticCueManager: ObservableObject {
@@ -17,6 +17,7 @@ final class HapticCueManager: ObservableObject {
 
     private var timer: Timer?
     private var isREM: Bool = false
+    private var settingsObserver: NSObjectProtocol?
 
     public init() {}
 
@@ -28,14 +29,28 @@ final class HapticCueManager: ObservableObject {
                                                selector: #selector(remWindowDidChange(_:)),
                                                name: HealthKitManager.remWindowDidChangeNotification,
                                                object: nil)
+        settingsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification,
+                                                                  object: nil,
+                                                                  queue: .main) { [weak self] _ in
+            self?.settingsDidChange()
+        }
     }
 
     /// Stops all cueing and removes observers.
     func stopCueing() {
         isCueing = false
         NotificationCenter.default.removeObserver(self, name: HealthKitManager.remWindowDidChangeNotification, object: nil)
+        if let settingsObserver = settingsObserver {
+            NotificationCenter.default.removeObserver(settingsObserver)
+            self.settingsObserver = nil
+        }
         cancelTimer()
         isREM = false
+    }
+
+    private func settingsDidChange() {
+        guard isREM else { return }
+        startTimer()
     }
 
     @objc private func remWindowDidChange(_ notification: Notification) {
@@ -57,10 +72,11 @@ final class HapticCueManager: ObservableObject {
     }
 
     private func startTimer() {
-        // Schedule a timer that fires every 30 seconds on the main run loop.
+        // Schedule a timer that fires on the configured interval on the main run loop.
         DispatchQueue.main.async {
             self.timer?.invalidate()
-            self.timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            let interval = AppSettings.cueIntervalSeconds
+            self.timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
                 self?.tryDeliverCue()
             }
             // Fire immediately on start for responsiveness
@@ -81,7 +97,7 @@ final class HapticCueManager: ObservableObject {
 
         // Throttle: no cue more often than every 20 seconds
         if let last = lastCueDate {
-            if Date().timeIntervalSince(last) < 20 {
+            if Date().timeIntervalSince(last) < AppSettings.minCueIntervalSeconds {
                 return
             }
         }
