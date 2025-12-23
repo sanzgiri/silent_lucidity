@@ -35,16 +35,16 @@ The app is designed to **fail safely**.
 ## 4. Configuration Strategy (Deep Sleepers)
 Users have different arousal thresholds. The **Settings** menu allows tuning:
 
-### A. Intensity (The "Volume")
-*   **Low**: `.click` (Sharp, light). Best for light sleepers.
-*   **Medium**: `.directionUp` (Tactile nudge). Balanced.
-*   **High**: `.start` (Heavy thump). For deep sleepers.
+### A. Haptic Type (The "Tone")
+*   **Low**: `click-only` (Sharp, light). Best for light sleepers.
+*   **Medium**: `click+start` (Layered cue). Balanced.
+*   **High**: `start-only` (Heavy thump). For deep sleepers.
 
 ### B. Repetitions (The "Duration")
-*   **Standard (2-3 reps)**: ~3-5 seconds. Sufficient for most users to notice the anomaly.
-*   **Extended (5-10 reps)**: ~8-15 seconds.
+*   **Standard (3-5 reps)**: Short pattern for lighter sleepers.
+*   **Extended (8-15 reps)**: Longer pattern for deep sleepers.
     *   **Reasoning**: Deep sleepers may need a longer stimulus to bridge the gap from deep immersion to noticing the sensation.
-    *   **Strategy**: It is better to **increase duration** before intensity. A long, gentle tapping is less likely to startle the user awake than a short, violent thump.
+    *   **Strategy**: Increase duration before intensity. A long, gentle tapping is less likely to startle the user awake than a short, heavy thump.
 
 ## 5. Visual Feedback
 If the user wakes up (false awakening) or checks the watch:

@@ -65,6 +65,9 @@ To verify the new heuristics without sleeping for 8 hours:
     *   Adjust **Pulse Count**, **Pulse Interval**, and **Haptic Type** to match your desired detectability.
     *   Tap **Test Haptic** to verify cue delivery.
     *   Toggle **Require Stillness** and confirm the "Still:" indicator updates when you keep the watch motionless.
+    *   Try **Detection Strictness** settings and confirm REM detection behavior shifts (lenient vs strict).
+    *   Adjust **Auto Mode** to Motion-only, Hybrid, or HealthKit-only for start/stop automation.
+    *   Set **Sleep Screen** style and confirm the chosen background appears during monitoring.
 5.  Open **History** after a short session:
     *   Verify entries for session start/stop and REM detected/ended windows.
 

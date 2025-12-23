@@ -433,6 +433,8 @@ final class HealthKitManager: ObservableObject {
                     print("Error fetching sleep samples: \(error)")
                     Task { @MainActor in
                         self.latestSleepSamples = []
+                        self.latestSleepStart = nil
+                        self.latestSleepEnd = nil
                         continuation.resume()
                     }
                     return
@@ -440,8 +442,17 @@ final class HealthKitManager: ObservableObject {
                 Task { @MainActor in
                     if let samples = samplesOrNil as? [HKCategorySample] {
                         self.latestSleepSamples = samples
+                        if let window = self.sleepSessionWindow(from: samples) {
+                            self.latestSleepStart = window.start
+                            self.latestSleepEnd = window.end
+                        } else {
+                            self.latestSleepStart = nil
+                            self.latestSleepEnd = nil
+                        }
                     } else {
                         self.latestSleepSamples = []
+                        self.latestSleepStart = nil
+                        self.latestSleepEnd = nil
                     }
                     continuation.resume()
                 }
@@ -476,7 +487,8 @@ final class HealthKitManager: ObservableObject {
         let hrRange = heartRateRange(from: heartRateSamples, sleepWindow: sleepWindow, now: now)
         let support = supportSignals(now: now)
         let supportAvailable = support.hrvAvailable || support.respAvailable
-        let supportOK = !supportAvailable || support.hrvSupport || support.respSupport
+        let supportOK = support.hrvSupport || support.respSupport
+        let strictness = AppSettings.detectionStrictness
 
         // 2. Look for REM sleep samples if available and current
         if let remSample = sleepSamples.last(where: { isREMValue($0.value) && $0.endDate >= sleepWindow.start && $0.startDate <= sleepWindow.end }) {
@@ -489,7 +501,10 @@ final class HealthKitManager: ObservableObject {
                     let bpm = sample.quantity.doubleValue(for: HKUnit.count().unitDivided(by: HKUnit.minute()))
                     return hrRange.contains(bpm)
                 }
-                if isHeartRateInREMRange || supportOK {
+                if explicitGatePasses(hrInRange: isHeartRateInREMRange,
+                                      supportAvailable: supportAvailable,
+                                      supportOK: supportOK,
+                                      strictness: strictness) {
                     let formatter = DateIntervalFormatter()
                     formatter.dateStyle = .none
                     formatter.timeStyle = .short
@@ -522,7 +537,10 @@ final class HealthKitManager: ObservableObject {
         formatter.timeStyle = .short
         let intervalString = formatter.string(from: inferredWindow.start, to: inferredWindow.end)
 
-        if isHeartRateInREMRange && supportOK {
+        if fallbackGatePasses(hrInRange: isHeartRateInREMRange,
+                              supportAvailable: supportAvailable,
+                              supportOK: supportOK,
+                              strictness: strictness) {
             return REMResult(isREM: true, description: "Approximated REM window: \(intervalString)", windowStart: inferredWindow.start, windowEnd: inferredWindow.end)
         }
         return REMResult(isREM: false, description: "No REM detected in approximated window: \(intervalString)", windowStart: inferredWindow.start, windowEnd: inferredWindow.end)
@@ -620,6 +638,46 @@ final class HealthKitManager: ObservableObject {
                                     hrvSupport: hrvSupport,
                                     respAvailable: respAvailable,
                                     respSupport: respSupport)
+    }
+
+    private func explicitGatePasses(hrInRange: Bool,
+                                    supportAvailable: Bool,
+                                    supportOK: Bool,
+                                    strictness: DetectionStrictness) -> Bool {
+        switch strictness {
+        case .lenient:
+            return true
+        case .balanced:
+            if supportAvailable {
+                return hrInRange || supportOK
+            }
+            return true
+        case .strict:
+            if supportAvailable {
+                return hrInRange && supportOK
+            }
+            return hrInRange
+        }
+    }
+
+    private func fallbackGatePasses(hrInRange: Bool,
+                                    supportAvailable: Bool,
+                                    supportOK: Bool,
+                                    strictness: DetectionStrictness) -> Bool {
+        switch strictness {
+        case .lenient:
+            if supportAvailable {
+                return hrInRange || supportOK
+            }
+            return hrInRange
+        case .balanced:
+            if supportAvailable {
+                return hrInRange && supportOK
+            }
+            return hrInRange
+        case .strict:
+            return hrInRange && supportAvailable && supportOK
+        }
     }
 
     private func isSampleRecent(_ date: Date?, now: Date, within interval: TimeInterval) -> Bool {

@@ -2,6 +2,7 @@ import SwiftUI
 import WatchKit
 
 struct WatchSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
     @AppStorage(AppSettingsKeys.lowPowerMode) private var lowPowerMode: Bool = false
     @AppStorage(AppSettingsKeys.requireStillness) private var requireStillness: Bool = true
     @AppStorage(AppSettingsKeys.stillnessMinutes) private var stillnessMinutes: Double = AppSettings.defaultStillnessMinutes
@@ -11,6 +12,9 @@ struct WatchSettingsView: View {
     @AppStorage(AppSettingsKeys.hapticPulseCount) private var hapticPulseCount: Int = AppSettings.defaultHapticPulseCount
     @AppStorage(AppSettingsKeys.hapticPulseInterval) private var hapticPulseInterval: Double = AppSettings.defaultHapticPulseInterval
     @AppStorage(AppSettingsKeys.hapticPatternType) private var hapticPatternType: String = AppSettings.defaultHapticPatternType.rawValue
+    @AppStorage(AppSettingsKeys.detectionStrictness) private var detectionStrictness: String = AppSettings.defaultDetectionStrictness.rawValue
+    @AppStorage(AppSettingsKeys.autoMode) private var autoMode: String = AppSettings.defaultAutoMode.rawValue
+    @AppStorage(AppSettingsKeys.sleepBackgroundStyle) private var sleepBackgroundStyle: String = AppSettings.defaultSleepBackgroundStyle.rawValue
 
     var body: some View {
         Form {
@@ -50,6 +54,33 @@ struct WatchSettingsView: View {
                 }
             }
 
+            Section(header: Text("Detection").font(.caption2)) {
+                Picker("Strictness", selection: $detectionStrictness) {
+                    ForEach(DetectionStrictness.allCases) { strictness in
+                        Text(strictness.label).tag(strictness.rawValue)
+                    }
+                }
+                .font(.caption2)
+            }
+
+            Section(header: Text("Automation").font(.caption2)) {
+                Picker("Auto Mode", selection: $autoMode) {
+                    ForEach(AutoMode.allCases) { mode in
+                        Text(mode.label).tag(mode.rawValue)
+                    }
+                }
+                .font(.caption2)
+            }
+
+            Section(header: Text("Display").font(.caption2)) {
+                Picker("Sleep Screen", selection: $sleepBackgroundStyle) {
+                    ForEach(SleepBackgroundStyle.allCases) { style in
+                        Text(style.label).tag(style.rawValue)
+                    }
+                }
+                .font(.caption2)
+            }
+
             Section(header: Text("Signals").font(.caption2)) {
                 Toggle(isOn: $useHRV) {
                     Text("Use HRV").font(.caption2)
@@ -60,6 +91,9 @@ struct WatchSettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .onReceive(NotificationCenter.default.publisher(for: .sessionDidStart)) { _ in
+            dismiss()
+        }
     }
 
     private func formattedPulseInterval() -> String {

@@ -26,14 +26,13 @@ REM (Rapid Eye Movement) sleep is biologically characterized by two simultaneous
 ### 3. REM Detection (Primary Path)
 *   If an explicit REM stage exists and is recent (within a short grace period):
     *   Require stillness (if enabled).
-    *   Accept if HR is within a dynamic range (median ± offset) **or**
-        HRV/respiratory signals indicate sleep-like physiology.
+    *   Accept based on **Detection Strictness** using HR range and support signals.
 
 ### 4. REM Detection (Fallback Path)
 *   If no current explicit REM:
     *   Approximate 90-minute cycles from sleep start.
     *   Choose the current or previous cycle’s last 20-minute REM window.
-    *   Require HR in range **and** support signals (when available).
+    *   Apply **Detection Strictness** to HR range and support signals.
 
 ### 5. Dynamic HR Range
 *   Uses recent heart rate samples (last ~2 hours) to compute a median baseline.
@@ -43,7 +42,17 @@ REM (Rapid Eye Movement) sleep is biologically characterized by two simultaneous
 *   Motion stillness must be maintained for a configurable duration (default 10 minutes).
 *   Can be disabled in settings to save battery or during testing.
 
-### 7. Session & REM Logging
+### 7. Detection Strictness
+*   **Lenient**: Trust explicit REM stages; inferred REM can pass with HR in range or support signals.
+*   **Balanced**: Uses HR in range and/or support signals when available; default.
+*   **Strict**: Requires HR in range plus support signals when available; inferred REM requires support availability.
+
+### 8. Auto Start/Stop Modes
+*   **Motion-only** (default): Start when still, stop after sustained movement.
+*   **Hybrid**: Motion + HealthKit sleep samples can start/stop sessions.
+*   **HealthKit-only**: Uses sleep samples only for session automation.
+
+### 9. Session & REM Logging
 *   History logs session start/stop and REM transitions (start/end) with window timestamps for cross-checking.
 
 ## Prototype (DreamDetector)

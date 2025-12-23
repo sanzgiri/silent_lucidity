@@ -9,9 +9,11 @@ final class MotionSleepMonitor: ObservableObject {
     @Published private(set) var isMonitoring: Bool = false
     @Published private(set) var isStillForSleep: Bool = false
     @Published private(set) var stillnessMinutes: Double = 0
+    @Published private(set) var movingMinutes: Double = 0
 
     private let motionManager = CMMotionManager()
     private var lastMovementTime = Date()
+    private var movingStart: Date?
     private let movementThreshold = 0.03
     private var settingsObserver: NSObjectProtocol?
 
@@ -67,16 +69,28 @@ final class MotionSleepMonitor: ObservableObject {
 
         if magnitude > movementThreshold {
             lastMovementTime = Date()
+            if movingStart == nil {
+                movingStart = Date()
+            }
+        } else {
+            movingStart = nil
         }
 
         let stillnessDuration = Date().timeIntervalSince(lastMovementTime)
         stillnessMinutes = stillnessDuration / 60
         isStillForSleep = stillnessDuration >= AppSettings.stillnessMinutes * 60
+        if let movingStart = movingStart {
+            movingMinutes = Date().timeIntervalSince(movingStart) / 60
+        } else {
+            movingMinutes = 0
+        }
     }
 
     private func resetState() {
         lastMovementTime = Date()
+        movingStart = nil
         stillnessMinutes = 0
         isStillForSleep = false
+        movingMinutes = 0
     }
 }
