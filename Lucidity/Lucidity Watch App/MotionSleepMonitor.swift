@@ -10,6 +10,7 @@ final class MotionSleepMonitor: ObservableObject {
     @Published private(set) var isStillForSleep: Bool = false
     @Published private(set) var stillnessMinutes: Double = 0
     @Published private(set) var movingMinutes: Double = 0
+    @Published private(set) var sleepOnsetDate: Date? = nil
 
     private let motionManager = CMMotionManager()
     private var lastMovementTime = Date()
@@ -72,6 +73,7 @@ final class MotionSleepMonitor: ObservableObject {
             if movingStart == nil {
                 movingStart = Date()
             }
+            sleepOnsetDate = nil
         } else {
             movingStart = nil
         }
@@ -79,6 +81,9 @@ final class MotionSleepMonitor: ObservableObject {
         let stillnessDuration = Date().timeIntervalSince(lastMovementTime)
         stillnessMinutes = stillnessDuration / 60
         isStillForSleep = stillnessDuration >= AppSettings.stillnessMinutes * 60
+        if isStillForSleep && sleepOnsetDate == nil {
+            sleepOnsetDate = lastMovementTime
+        }
         if let movingStart = movingStart {
             movingMinutes = Date().timeIntervalSince(movingStart) / 60
         } else {
@@ -92,5 +97,6 @@ final class MotionSleepMonitor: ObservableObject {
         stillnessMinutes = 0
         isStillForSleep = false
         movingMinutes = 0
+        sleepOnsetDate = nil
     }
 }

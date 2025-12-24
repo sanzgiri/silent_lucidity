@@ -16,9 +16,10 @@ final class HistoryStore: ObservableObject {
     
     init() {}
     
-    func log(note: String) {
-        let event = CueEvent(date: Date(), note: note)
+    func log(note: String, date: Date = Date()) {
+        let event = CueEvent(date: date, note: note)
         events.append(event)
+        events.sort { $0.date < $1.date }
     }
 }
 

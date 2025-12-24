@@ -32,6 +32,9 @@ final class HealthKitManager: ObservableObject {
     /// The most recent heart rate sample value in beats per minute.
     @Published var latestHeartRate: Double? = nil
 
+    /// The date of the most recent heart rate sample.
+    @Published private(set) var latestHeartRateDate: Date? = nil
+
     /// The most recent heart rate variability (SDNN) in milliseconds.
     @Published private(set) var latestHRV: Double? = nil
 
@@ -54,9 +57,14 @@ final class HealthKitManager: ObservableObject {
     private var latestHRVDate: Date? = nil
     private var latestRespiratoryRateDate: Date? = nil
     private var lastREMState: Bool? = nil
-    private var lastREMWindowStart: Date? = nil
-    private var lastREMWindowEnd: Date? = nil
-    private var lastREMWindowDescription: String? = nil
+    @Published private(set) var lastREMWindowStart: Date? = nil
+    @Published private(set) var lastREMWindowEnd: Date? = nil
+    @Published private(set) var lastREMWindowDescription: String? = nil
+    private var lastLoggedRemWindowID: String? = nil
+    private var lastLoggedRemEndedWindowID: String? = nil
+    private var sessionStart: Date? = nil
+    private var predictionModel: PredictionModel? = nil
+    private var lastPredictionRefresh: Date? = nil
     
     static let remWindowDidChangeNotification = Notification.Name("REMWindowDidChange")
 
@@ -120,6 +128,14 @@ final class HealthKitManager: ObservableObject {
         }
     }
 
+    func setSessionStart(_ date: Date) {
+        sessionStart = date
+    }
+
+    func clearSessionStart() {
+        sessionStart = nil
+    }
+
     /// Starts monitoring sleep and heart rate data.
     /// Sets up an observer query for sleep analysis and an anchored object query for heart rate, updating the published properties accordingly.
     func startSleepMonitoring() {
@@ -154,6 +170,7 @@ final class HealthKitManager: ObservableObject {
             print("Sleep observer query triggered")
             Task {
                 await self.fetchLatestSleepSamples()
+                await self.refreshPredictionModelIfNeeded()
                 await self.evaluateAndPublish()
                 completionHandler()
             }
@@ -286,6 +303,7 @@ final class HealthKitManager: ObservableObject {
         Task {
             print("Starting initial data fetch...")
             await fetchLatestSleepSamples()
+            await refreshPredictionModelIfNeeded()
             await evaluateAndPublish()
             print("Initial data fetch completed")
         }
@@ -319,6 +337,7 @@ final class HealthKitManager: ObservableObject {
         
         self.lastSleepWindowDescription = "No REM window detected"
         self.latestHeartRate = nil
+        self.latestHeartRateDate = nil
         self.latestHRV = nil
         self.latestRespiratoryRate = nil
         self.latestHRVDate = nil
@@ -327,6 +346,9 @@ final class HealthKitManager: ObservableObject {
         self.lastREMWindowStart = nil
         self.lastREMWindowEnd = nil
         self.lastREMWindowDescription = nil
+        self.lastLoggedRemWindowID = nil
+        self.lastLoggedRemEndedWindowID = nil
+        self.sessionStart = nil
     }
 
     /// Convenience function to fetch the most recent sleep sample start date of "inBed" or "asleep".
@@ -473,9 +495,10 @@ final class HealthKitManager: ObservableObject {
         let now = Date()
 
         // 1. Find the most recent sleep session window
-        guard let sleepWindow = sleepSessionWindow(from: sleepSamples) else {
+        guard let sleepWindow = resolvedSleepWindow(from: sleepSamples, now: now) else {
             return REMResult(isREM: false, description: "No sleep start detected", windowStart: nil, windowEnd: nil)
         }
+        let sleepSamplesFresh = areSleepSamplesFresh(sleepSamples, now: now)
 
         let requireStillness = AppSettings.requireStillness
         let motionMonitor = MotionSleepMonitor.shared
@@ -491,7 +514,8 @@ final class HealthKitManager: ObservableObject {
         let strictness = AppSettings.detectionStrictness
 
         // 2. Look for REM sleep samples if available and current
-        if let remSample = sleepSamples.last(where: { isREMValue($0.value) && $0.endDate >= sleepWindow.start && $0.startDate <= sleepWindow.end }) {
+        if sleepSamplesFresh,
+           let remSample = sleepSamples.last(where: { isREMValue($0.value) && $0.endDate >= sleepWindow.start && $0.startDate <= sleepWindow.end }) {
             let remStart = remSample.startDate
             let remEnd = remSample.endDate
             let isCurrent = now <= remEnd.addingTimeInterval(remSampleGracePeriod)
@@ -521,9 +545,16 @@ final class HealthKitManager: ObservableObject {
             return REMResult(isREM: false, description: "Sleep start in future or no elapsed time", windowStart: nil, windowEnd: nil)
         }
 
-        let inferredWindow = inferredRemWindow(sleepStartDate: sleepWindow.start, now: now)
+        let inferredWindow = predictedRemWindow(sleepStartDate: sleepWindow.start, now: now)
         if now < inferredWindow.start {
             return REMResult(isREM: false, description: "No REM window yet", windowStart: inferredWindow.start, windowEnd: inferredWindow.end)
+        }
+        if now > inferredWindow.end {
+            let formatter = DateIntervalFormatter()
+            formatter.dateStyle = .none
+            formatter.timeStyle = .short
+            let intervalString = formatter.string(from: inferredWindow.start, to: inferredWindow.end)
+            return REMResult(isREM: false, description: "REM window passed: \(intervalString)", windowStart: inferredWindow.start, windowEnd: inferredWindow.end)
         }
 
         let hrSamplesInWindow = overlappingSamples(in: heartRateSamples, start: inferredWindow.start, end: inferredWindow.end)
@@ -558,6 +589,7 @@ final class HealthKitManager: ObservableObject {
         
         self.lastSleepWindowDescription = result.description
         self.latestHeartRate = lastHRBPM
+        self.latestHeartRateDate = latestHeartRateSamples.last?.endDate
 
         logREMTransitionIfNeeded(result: result)
         
@@ -589,12 +621,30 @@ final class HealthKitManager: ObservableObject {
     private let remSampleGracePeriod: TimeInterval = 10 * 60
     private let heartRateRangeLookback: TimeInterval = 2 * 60 * 60
     private let supportSignalRecency: TimeInterval = 30 * 60
+    private let sleepSampleFreshness: TimeInterval = 45 * 60
+    private let predictionLookbackDays: Int = 14
+    private let predictionRefreshInterval: TimeInterval = 6 * 60 * 60
+    private let remMergeGap: TimeInterval = 5 * 60
+    private let minRemLatency: TimeInterval = 40 * 60
+    private let maxRemLatency: TimeInterval = 160 * 60
+    private let minRemCycle: TimeInterval = 70 * 60
+    private let maxRemCycle: TimeInterval = 120 * 60
+    private let minRemDuration: TimeInterval = 10 * 60
+    private let maxRemDuration: TimeInterval = 40 * 60
 
     private struct SupportSignalSummary {
         let hrvAvailable: Bool
         let hrvSupport: Bool
         let respAvailable: Bool
         let respSupport: Bool
+    }
+
+    private struct PredictionModel {
+        let remLatency: TimeInterval
+        let remCycle: TimeInterval
+        let remDuration: TimeInterval
+        let sourceNights: Int
+        let sourceWindows: Int
     }
 
     private struct REMResult {
@@ -680,6 +730,226 @@ final class HealthKitManager: ObservableObject {
         }
     }
 
+    private func areSleepSamplesFresh(_ samples: [HKCategorySample], now: Date) -> Bool {
+        guard let lastEnd = latestSleepSampleEndDate(from: samples) else { return false }
+        return isSampleRecent(lastEnd, now: now, within: sleepSampleFreshness)
+    }
+
+    private func latestSleepSampleEndDate(from samples: [HKCategorySample]) -> Date? {
+        let sleepSamples = samples.filter { isSleepValue($0.value) }
+        return sleepSamples.map(\.endDate).max()
+    }
+
+    private func resolvedSleepWindow(from samples: [HKCategorySample], now: Date) -> (start: Date, end: Date)? {
+        let primary = sleepSessionWindow(from: samples)
+        let fallback = fallbackSleepWindow(now: now)
+        guard let primary else { return fallback }
+
+        if areSleepSamplesFresh(samples, now: now) {
+            return primary
+        }
+        if let fallback, fallback.start > primary.end {
+            return fallback
+        }
+        return primary
+    }
+
+    private func fallbackSleepWindow(now: Date) -> (start: Date, end: Date)? {
+        let motionStart = MotionSleepMonitor.shared.sleepOnsetDate
+        let candidateStart = [sessionStart, motionStart].compactMap { $0 }.max()
+        guard let start = candidateStart else { return nil }
+        return (start: start, end: now)
+    }
+
+    private func predictedRemWindow(sleepStartDate: Date, now: Date) -> (start: Date, end: Date) {
+        let model = predictionModel ?? PredictionModel(remLatency: remCycleInterval - remWindowDuration,
+                                                       remCycle: remCycleInterval,
+                                                       remDuration: remWindowDuration,
+                                                       sourceNights: 0,
+                                                       sourceWindows: 0)
+        let latency = model.remLatency
+        let cycle = model.remCycle
+        let duration = model.remDuration
+
+        let elapsed = now.timeIntervalSince(sleepStartDate)
+        let firstStart = sleepStartDate.addingTimeInterval(latency)
+        if elapsed < latency {
+            return (firstStart, firstStart.addingTimeInterval(duration))
+        }
+
+        let cyclesElapsed = max(0, Int((elapsed - latency) / cycle))
+        let currentStart = firstStart.addingTimeInterval(TimeInterval(cyclesElapsed) * cycle)
+        let currentEnd = currentStart.addingTimeInterval(duration)
+
+        if now < currentStart, cyclesElapsed > 0 {
+            let previousStart = currentStart.addingTimeInterval(-cycle)
+            return (previousStart, previousStart.addingTimeInterval(duration))
+        }
+
+        return (currentStart, currentEnd)
+    }
+
+    private func refreshPredictionModelIfNeeded() async {
+        let now = Date()
+        if let lastRefresh = lastPredictionRefresh,
+           now.timeIntervalSince(lastRefresh) < predictionRefreshInterval {
+            return
+        }
+        lastPredictionRefresh = now
+        await refreshPredictionModel()
+    }
+
+    private func refreshPredictionModel() async {
+        let samples = await fetchSleepSamplesForPrediction()
+        predictionModel = buildPredictionModel(from: samples)
+    }
+
+    private func fetchSleepSamplesForPrediction() async -> [HKCategorySample] {
+        guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return [] }
+        let lookbackStart = Calendar.current.date(byAdding: .day, value: -predictionLookbackDays, to: Date())
+            ?? Date().addingTimeInterval(-Double(predictionLookbackDays) * 24 * 60 * 60)
+        let predicate = HKQuery.predicateForSamples(withStart: lookbackStart, end: Date(), options: .strictStartDate)
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+
+        return await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(sampleType: sleepType,
+                                      predicate: predicate,
+                                      limit: HKObjectQueryNoLimit,
+                                      sortDescriptors: [sortDescriptor]) { _, samplesOrNil, errorOrNil in
+                if let error = errorOrNil {
+                    print("Error fetching sleep samples for prediction: \(error)")
+                    continuation.resume(returning: [])
+                    return
+                }
+                let samples = samplesOrNil as? [HKCategorySample] ?? []
+                continuation.resume(returning: samples)
+            }
+            healthStore.execute(query)
+        }
+    }
+
+    private func buildPredictionModel(from samples: [HKCategorySample]) -> PredictionModel? {
+        let sessions = sleepSessions(from: samples)
+        var latencies: [TimeInterval] = []
+        var cycles: [TimeInterval] = []
+        var durations: [TimeInterval] = []
+        var windowsCount = 0
+        var nightsCount = 0
+
+        for session in sessions {
+            let remWindows = mergeRemWindows(from: session.remSamples)
+            guard !remWindows.isEmpty else { continue }
+
+            nightsCount += 1
+            windowsCount += remWindows.count
+            latencies.append(remWindows[0].start.timeIntervalSince(session.start))
+            durations.append(contentsOf: remWindows.map { $0.end.timeIntervalSince($0.start) })
+            if remWindows.count >= 2 {
+                for index in 1..<remWindows.count {
+                    let interval = remWindows[index].start.timeIntervalSince(remWindows[index - 1].start)
+                    cycles.append(interval)
+                }
+            }
+        }
+
+        guard !latencies.isEmpty else { return nil }
+
+        let latency = clamp(median(latencies) ?? (remCycleInterval - remWindowDuration),
+                            min: minRemLatency,
+                            max: maxRemLatency)
+        let cycle = clamp(median(cycles) ?? remCycleInterval,
+                          min: minRemCycle,
+                          max: maxRemCycle)
+        let duration = clamp(median(durations) ?? remWindowDuration,
+                             min: minRemDuration,
+                             max: maxRemDuration)
+
+        return PredictionModel(remLatency: latency,
+                               remCycle: cycle,
+                               remDuration: duration,
+                               sourceNights: nightsCount,
+                               sourceWindows: windowsCount)
+    }
+
+    private struct SleepSessionPrediction {
+        var start: Date
+        var end: Date
+        var remSamples: [HKCategorySample]
+    }
+
+    private func sleepSessions(from samples: [HKCategorySample]) -> [SleepSessionPrediction] {
+        let sleepSamples = samples.filter { isSleepValue($0.value) }.sorted(by: { $0.startDate < $1.startDate })
+        var sessions: [SleepSessionPrediction] = []
+        var current: SleepSessionPrediction? = nil
+
+        for sample in sleepSamples {
+            if current == nil {
+                current = SleepSessionPrediction(start: sample.startDate,
+                                                 end: sample.endDate,
+                                                 remSamples: [])
+            } else if sample.startDate.timeIntervalSince(current?.end ?? sample.startDate) > sleepSessionGap {
+                if let current = current {
+                    sessions.append(current)
+                }
+                current = SleepSessionPrediction(start: sample.startDate,
+                                                 end: sample.endDate,
+                                                 remSamples: [])
+            } else if var session = current {
+                if sample.endDate > session.end {
+                    session.end = sample.endDate
+                }
+                current = session
+            }
+
+            if isREMValue(sample.value), var session = current {
+                session.remSamples.append(sample)
+                current = session
+            }
+        }
+
+        if let current = current {
+            sessions.append(current)
+        }
+
+        return sessions
+    }
+
+    private func mergeRemWindows(from samples: [HKCategorySample]) -> [(start: Date, end: Date)] {
+        let sorted = samples.sorted(by: { $0.startDate < $1.startDate })
+        var windows: [(start: Date, end: Date)] = []
+
+        for sample in sorted {
+            if windows.isEmpty {
+                windows.append((sample.startDate, sample.endDate))
+                continue
+            }
+            let lastIndex = windows.count - 1
+            let last = windows[lastIndex]
+            if sample.startDate <= last.end.addingTimeInterval(remMergeGap) {
+                let newEnd = max(last.end, sample.endDate)
+                windows[lastIndex] = (start: last.start, end: newEnd)
+            } else {
+                windows.append((sample.startDate, sample.endDate))
+            }
+        }
+
+        return windows
+    }
+
+    private func median(_ values: [TimeInterval]) -> TimeInterval? {
+        guard !values.isEmpty else { return nil }
+        let sorted = values.sorted()
+        let mid = sorted.count / 2
+        if sorted.count % 2 == 0 {
+            return (sorted[mid - 1] + sorted[mid]) / 2
+        }
+        return sorted[mid]
+    }
+
+    private func clamp(_ value: TimeInterval, min minValue: TimeInterval, max maxValue: TimeInterval) -> TimeInterval {
+        max(minValue, min(maxValue, value))
+    }
+
     private func isSampleRecent(_ date: Date?, now: Date, within interval: TimeInterval) -> Bool {
         guard let date = date else { return false }
         return now.timeIntervalSince(date) <= interval
@@ -753,26 +1023,36 @@ final class HealthKitManager: ObservableObject {
                 lastREMWindowDescription = result.description
             }
         }
-
-        guard let lastState = lastREMState, lastState != result.isREM else {
-            return
-        }
+        let windowID = remWindowID(start: result.windowStart, end: result.windowEnd)
 
         if result.isREM {
-            let intervalText = formattedInterval(start: result.windowStart, end: result.windowEnd)
-            let note = intervalText.map { "REM detected: \($0)" } ?? "REM detected"
-            HistoryStore.shared.log(note: note)
+            if let windowID, windowID != lastLoggedRemWindowID {
+                let intervalText = formattedInterval(start: result.windowStart, end: result.windowEnd)
+                let note = intervalText.map { "REM detected: \($0)" } ?? "REM detected"
+                let eventDate = result.windowStart ?? Date()
+                HistoryStore.shared.log(note: note, date: eventDate)
+                lastLoggedRemWindowID = windowID
+                lastLoggedRemEndedWindowID = nil
+            }
             return
         }
 
-        if let lastStart = lastREMWindowStart, let lastEnd = lastREMWindowEnd,
-           let intervalText = formattedInterval(start: lastStart, end: lastEnd) {
-            HistoryStore.shared.log(note: "REM ended: \(intervalText)")
-        } else if let lastDescription = lastREMWindowDescription {
-            HistoryStore.shared.log(note: "REM ended: \(lastDescription)")
-        } else {
-            HistoryStore.shared.log(note: "REM ended")
+        if let lastID = lastLoggedRemWindowID,
+           lastLoggedRemEndedWindowID != lastID,
+           let lastEnd = lastREMWindowEnd,
+           Date() >= lastEnd {
+            let intervalText = formattedInterval(start: lastREMWindowStart, end: lastREMWindowEnd)
+            let note = intervalText.map { "REM ended: \($0)" } ?? "REM ended"
+            HistoryStore.shared.log(note: note, date: lastEnd)
+            lastLoggedRemEndedWindowID = lastID
         }
+    }
+
+    private func remWindowID(start: Date?, end: Date?) -> String? {
+        guard let start = start, let end = end else { return nil }
+        let startMinutes = Int(start.timeIntervalSince1970 / 60)
+        let endMinutes = Int(end.timeIntervalSince1970 / 60)
+        return "\(startMinutes)-\(endMinutes)"
     }
 
     private func formattedInterval(start: Date?, end: Date?) -> String? {

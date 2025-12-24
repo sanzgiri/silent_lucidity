@@ -13,6 +13,7 @@ struct ContentView: View {
     @StateObject private var health = HealthKitManager.shared
     @ObservedObject private var haptics = HapticCueManager.shared
     @ObservedObject private var motion = MotionSleepMonitor.shared
+    @ObservedObject private var workout = WorkoutSessionManager.shared
     @AppStorage(AppSettingsKeys.lowPowerMode) private var lowPowerMode: Bool = false
     @AppStorage(AppSettingsKeys.requireStillness) private var requireStillness: Bool = true
     @AppStorage(AppSettingsKeys.autoMode) private var autoMode: String = AppSettings.defaultAutoMode.rawValue
@@ -62,6 +63,7 @@ struct ContentView: View {
                         SummaryView(health: health,
                                     haptics: haptics,
                                     motion: motion,
+                                    workout: workout,
                                     requireStillness: requireStillness)
                     } label: {
                         Text("Summary")
@@ -135,6 +137,10 @@ struct ContentView: View {
                 stopMonitoring(reason: "Auto stop (HealthKit)")
             }
         }
+        .onChange(of: workout.workoutState) { _, state in
+            guard state == .failed else { return }
+            statusMessage = workout.workoutErrorDescription ?? "Workout failed"
+        }
     }
     
     private var autoModeValue: AutoMode {
@@ -156,6 +162,8 @@ struct ContentView: View {
                         } else {
                             motion.stop()
                         }
+                        SessionSummaryStore.shared.startSession(startDate: Date())
+                        health.setSessionStart(Date())
                         health.startMonitoring()
                         haptics.startCueing()
                         if !lowPowerMode {
@@ -198,8 +206,16 @@ struct ContentView: View {
             isMonitoring = false
             statusMessage = "Stopped"
             showSleepScreen = false
+            let endDate = Date()
+            SessionSummaryStore.shared.endSession(endDate: endDate,
+                                                  lastSleepStart: health.latestSleepStart,
+                                                  lastSleepEnd: health.latestSleepEnd,
+                                                  lastREMWindowStart: health.lastREMWindowStart,
+                                                  lastREMWindowEnd: health.lastREMWindowEnd,
+                                                  lastREMDescription: health.lastREMWindowDescription ?? health.lastSleepWindowDescription)
             motion.stop()
             health.stopMonitoring()
+            health.clearSessionStart()
             haptics.stopCueing()
             WorkoutSessionManager.shared.stopSession()
             HistoryStore.shared.log(note: "Session stopped")
@@ -217,19 +233,51 @@ struct SummaryView: View {
     @ObservedObject var health: HealthKitManager
     @ObservedObject var haptics: HapticCueManager
     @ObservedObject var motion: MotionSleepMonitor
+    @ObservedObject var workout: WorkoutSessionManager
     let requireStillness: Bool
+    @ObservedObject private var sessionSummary = SessionSummaryStore.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 6) {
+                if let summary = sessionSummary.lastSummary {
+                    sectionTitle("Last Session")
+                    Text("Start: \(formatTime(summary.sessionStart))")
+                    Text("End: \(formatTime(summary.sessionEnd))")
+                    Text("REM: \(summaryText(summary))")
+                        .lineLimit(2)
+                    Text("Strictness: \(summary.detectionStrictnessLabel)")
+                    Text("Auto Mode: \(summary.autoModeLabel)")
+                    Text("Low Power: \(summary.lowPowerMode ? "On" : "Off")")
+                    Text("Stillness: \(Int(summary.stillnessMinutes)) min")
+                    Text("Cue Interval: \(Int(summary.cueIntervalSeconds))s")
+                    Text("Haptics: \(summary.hapticPatternLabel) \(summary.hapticPulseCount)x @ \(String(format: "%.2f", summary.hapticPulseInterval))s")
+                    Text("Signals: HRV \(summary.useHRV ? "On" : "Off"), Resp \(summary.useRespiratoryRate ? "On" : "Off")")
+                    Text("Sleep Screen: \(summary.sleepBackgroundLabel)")
+                } else {
+                    sectionTitle("Last Session")
+                    Text("No previous session summary.")
+                }
+
+                sectionTitle("Live Diagnostics")
+            Text("Workout: \(workoutStateText())")
+            if workout.workoutState == .failed, let error = workout.workoutErrorDescription {
+                Text("Workout Err: \(error)")
+                    .lineLimit(1)
+            }
             Text("HR: \(formattedHeartRate())")
+            Text("HR Age: \(formattedHRAge())")
             Text("Last: \(formattedSleepWindow())")
                 .lineLimit(1)
             Text("REM: \(health.lastSleepWindowDescription)")
                 .lineLimit(1)
             Text("Cue: \(formattedLastCue())")
                 .lineLimit(1)
+            Text("Motion: \(motionStatusText())")
+            Text("Still: \(motion.isStillForSleep ? "Yes" : "No")")
             if requireStillness {
-                Text("Still: \(formattedStillness())")
+                Text("Stillness: \(formattedStillness())")
+            }
             }
         }
         .font(.caption2)
@@ -255,6 +303,20 @@ struct SummaryView: View {
         return "--"
     }
 
+    private func formattedHRAge() -> String {
+        guard let date = health.latestHeartRateDate else { return "--" }
+        let elapsed = Date().timeIntervalSince(date)
+        if elapsed < 60 {
+            return "<1m"
+        }
+        let minutes = Int(elapsed / 60)
+        if minutes < 60 {
+            return "\(minutes)m"
+        }
+        let hours = minutes / 60
+        return "\(hours)h"
+    }
+
     private func formattedLastCue() -> String {
         guard let date = haptics.lastCueDate else { return "None" }
         let formatter = DateFormatter()
@@ -264,6 +326,47 @@ struct SummaryView: View {
 
     private func formattedStillness() -> String {
         String(format: "%.0f min", motion.stillnessMinutes)
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.caption)
+            .bold()
+            .foregroundColor(.primary)
+    }
+
+    private func formatTime(_ date: Date?) -> String {
+        guard let date = date else { return "--" }
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    private func summaryText(_ summary: SessionSummary) -> String {
+        if let start = summary.lastREMWindowStart, let end = summary.lastREMWindowEnd {
+            let formatter = DateIntervalFormatter()
+            formatter.dateStyle = .none
+            formatter.timeStyle = .short
+            return formatter.string(from: start, to: end)
+        }
+        return summary.lastREMDescription
+    }
+
+    private func motionStatusText() -> String {
+        motion.isMonitoring ? "Active" : "Off"
+    }
+
+    private func workoutStateText() -> String {
+        switch workout.workoutState {
+        case .idle:
+            return "Idle"
+        case .requesting:
+            return "Starting"
+        case .running:
+            return "Running"
+        case .failed:
+            return "Failed"
+        }
     }
 }
 

@@ -22,6 +22,8 @@ REM (Rapid Eye Movement) sleep is biologically characterized by two simultaneous
 *   Use the last 12 hours of sleep samples.
 *   Merge contiguous samples; a gap > 30 minutes starts a new session.
 *   The most recent session window defines the active sleep period.
+*   If sleep samples are stale or missing, fall back to session start or stillness onset.
+*   Historical REM timing (latency/cycle/duration) personalizes inferred REM windows when live stages are unavailable.
 
 ### 3. REM Detection (Primary Path)
 *   If an explicit REM stage exists and is recent (within a short grace period):

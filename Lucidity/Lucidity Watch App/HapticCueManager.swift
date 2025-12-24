@@ -18,6 +18,8 @@ final class HapticCueManager: ObservableObject {
     private var timer: Timer?
     private var isREM: Bool = false
     private var settingsObserver: NSObjectProtocol?
+    private var remEndWorkItem: DispatchWorkItem?
+    private var remWindowEnd: Date?
 
     public init() {}
 
@@ -45,6 +47,7 @@ final class HapticCueManager: ObservableObject {
             self.settingsObserver = nil
         }
         cancelTimer()
+        cancelRemEndWorkItem()
         isREM = false
     }
 
@@ -58,16 +61,24 @@ final class HapticCueManager: ObservableObject {
               let rem = userInfo["isREM"] as? Bool else {
             return
         }
-        updateREM(rem)
+        let windowEnd = userInfo["windowEnd"] as? Date
+        updateREM(rem, windowEnd: windowEnd)
     }
 
-    private func updateREM(_ rem: Bool) {
+    private func updateREM(_ rem: Bool, windowEnd: Date? = nil) {
         if rem && !isREM {
             isREM = true
+            remWindowEnd = windowEnd
             startTimer()
+            scheduleRemEndIfNeeded()
         } else if !rem && isREM {
             isREM = false
             cancelTimer()
+            cancelRemEndWorkItem()
+            remWindowEnd = nil
+        } else if rem {
+            remWindowEnd = windowEnd
+            scheduleRemEndIfNeeded()
         }
     }
 
@@ -89,6 +100,26 @@ final class HapticCueManager: ObservableObject {
             self.timer?.invalidate()
             self.timer = nil
         }
+    }
+
+    private func scheduleRemEndIfNeeded() {
+        cancelRemEndWorkItem()
+        guard let end = remWindowEnd else { return }
+        let interval = end.timeIntervalSince(Date())
+        if interval <= 0 {
+            updateREM(false)
+            return
+        }
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.updateREM(false)
+        }
+        remEndWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + interval, execute: workItem)
+    }
+
+    private func cancelRemEndWorkItem() {
+        remEndWorkItem?.cancel()
+        remEndWorkItem = nil
     }
 
     private func tryDeliverCue() {

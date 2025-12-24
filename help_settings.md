@@ -4,6 +4,7 @@ This document explains each setting in the watch app, how it affects detection, 
 
 ## Overview
 Lucidity estimates REM windows using sleep stages, heart rate trends, optional HRV and respiratory rate signals, and a motion stillness gate. It is a heuristic, not a medical tool.
+If sleep stages arrive after waking, the app falls back to session start or stillness onset and uses historical REM timing to estimate windows.
 
 ## Monitoring
 - Low Power: Increases cue interval minimums, slows motion polling, and skips workout sessions to save battery. Heart rate updates may be less frequent.
@@ -37,3 +38,7 @@ Lucidity estimates REM windows using sleep stages, heart rate trends, optional H
 
 ## History
 History logs session start/stop, REM start/end windows, and cue deliveries for cross-checking against other sleep trackers.
+Event timestamps are aligned to the REM window start/end (not the time the log is written), and events are sorted by time to keep order consistent.
+
+## Summary
+Summary shows the last session settings used and live diagnostics (workout state, HR age, motion status) to help troubleshoot missing cues.

@@ -6,6 +6,7 @@ struct HelpView: View {
             VStack(alignment: .leading, spacing: 8) {
                 sectionTitle("Overview")
                 Text("Lucidity estimates REM windows using sleep stages, heart rate, optional HRV and respiratory rate, and motion stillness. It is a heuristic, not medical guidance.")
+                Text("When sleep stages arrive after waking, the app falls back to session start or stillness onset and uses historical REM timing to estimate windows.")
 
                 sectionTitle("Monitoring")
                 Text("- Low Power reduces cue cadence, slows motion updates, and skips workout sessions to save battery.")
